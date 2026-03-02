@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Hammer,
@@ -95,26 +95,14 @@ export function Sidebar() {
   return (
     <>
       <div className="w-[220px] flex-shrink-0 bg-bg-secondary border-r border-border-subtle h-full flex flex-col select-none relative z-10">
-        {/* Traffic-light safe zone — blank drag region */}
-        <div
-          className="h-[38px] shrink-0"
-          style={{ WebkitAppRegion: "drag" } as CSSProperties}
-        />
+        {/* Traffic-light safe zone */}
+        <div className="h-[38px] shrink-0" />
         {/* App logo — sits below macOS window controls */}
-        <div
-          className="flex items-center px-3 gap-2.5 pb-2 shrink-0"
-          style={{ WebkitAppRegion: "drag" } as CSSProperties}
-        >
-          <div
-            className="w-[20px] h-[20px] rounded-[5px] bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.25)]"
-            style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
-          >
+        <div className="flex items-center px-3 gap-2.5 pb-2 shrink-0">
+          <div className="w-[20px] h-[20px] rounded-[5px] bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0 shadow-[0_0_10px_rgba(16,185,129,0.25)]">
             <Hammer className="w-3 h-3 text-white" />
           </div>
-          <span
-            className="text-[14px] font-semibold text-secondary tracking-tight truncate leading-[20px]"
-            style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
-          >
+          <span className="text-[14px] font-semibold text-secondary tracking-tight truncate leading-[20px]">
             {t("app.name")}
           </span>
         </div>
