@@ -136,7 +136,7 @@ export function Sidebar() {
 
         {/* Scenarios */}
         <div className="px-2.5 flex-1 overflow-y-auto scrollbar-hide min-h-0">
-          <div className="text-[11px] font-semibold text-faint mb-1.5 px-2.5 tracking-[0.1em] uppercase">
+          <div className="text-[11px] font-semibold text-muted mb-1.5 px-2.5 tracking-[0.1em] uppercase">
             {t("sidebar.scenarios")}
           </div>
           <div className="space-y-0.5">

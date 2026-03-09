@@ -157,7 +157,7 @@ export function Settings() {
                   <h3 className={cn("text-[11px] font-medium truncate", agent.installed ? "text-secondary" : "text-muted")}>
                     {agent.display_name}
                   </h3>
-                  <p className="text-[9px] text-faint truncate" title={agent.skills_dir}>
+                  <p className="text-[10px] text-muted truncate" title={agent.skills_dir}>
                     {agent.installed ? agent.skills_dir.replace(/\/Users\/[^/]+/, "~").replace(/\/home\/[^/]+/, "~").replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~") : t("settings.notInstalled")}
                   </p>
                 </div>

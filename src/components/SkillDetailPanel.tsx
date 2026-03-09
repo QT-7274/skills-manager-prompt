@@ -100,7 +100,7 @@ export function SkillDetailPanel({ skill, onClose, syncMeta, syncing, onSync }: 
                 })}
               </span>
               {syncMeta.syncedToolLabels.length > 0 && (
-                <span className="text-faint">({syncMeta.syncedToolLabels.join(", ")})</span>
+                <span className="text-muted">({syncMeta.syncedToolLabels.join(", ")})</span>
               )}
             </div>
             <div className="flex items-center gap-1.5">
