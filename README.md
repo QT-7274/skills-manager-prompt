@@ -32,13 +32,14 @@ Back up `~/.skills-manager/skills/` to a Git repo for version history and multi-
 ### Quick setup
 
 1. Create a private repository (recommended).
-2. Open **Settings → Git Backup**.
-3. Choose one:
-- Existing remote: open **Advanced Settings**, set remote URL, click **Start Backup** (clone).
-- New local repo: click **Start Backup** directly, then set remote URL in **Advanced Settings**.
-4. Click **Sync Now**.
+2. Open **Settings → Git Sync Configuration** and save your remote URL.
+3. Open **My Skills**.
+4. Choose one:
+- Existing remote: click **Start Backup** to clone from the configured remote.
+- New local repo: click **Start Backup** to initialize locally, then use **Sync to Git**.
+5. Use **Sync to Git** from the My Skills toolbar.
 
-`Sync Now` automatically does pull/commit/push based on current repo status.
+`Sync to Git` automatically handles pull/commit/push based on current repo status.
 
 ### Authentication
 
