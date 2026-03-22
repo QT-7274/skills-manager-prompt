@@ -3,7 +3,7 @@ use std::sync::Arc;
 use semver::Version;
 use tauri::State;
 
-use crate::core::{central_repo, error::AppError, skill_store::SkillStore};
+use crate::core::{central_repo, error::AppError, skill_store::SkillStore, skillssh_api};
 
 #[derive(serde::Serialize)]
 pub struct AppUpdateInfo {
@@ -77,15 +77,9 @@ pub async fn open_central_repo_folder() -> Result<(), AppError> {
 #[tauri::command]
 pub async fn check_app_update(app: tauri::AppHandle, store: State<'_, Arc<SkillStore>>) -> Result<AppUpdateInfo, AppError> {
     let current_version = app.config().version.clone().unwrap_or_default();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut builder = reqwest::blocking::Client::builder().user_agent("skills-manager");
-        if let Some(proxy) = proxy_url.as_deref().filter(|s| !s.is_empty()) {
-            if let Ok(p) = reqwest::Proxy::all(proxy) {
-                builder = builder.proxy(p);
-            }
-        }
-        let client = builder.build().map_err(AppError::network)?;
+        let client = skillssh_api::build_http_client(proxy_url.as_deref(), 15);
 
         let resp: serde_json::Value = client
             .get("https://api.github.com/repos/xingkongliang/skills-manager/releases/latest")

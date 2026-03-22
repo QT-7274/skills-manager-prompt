@@ -451,6 +451,10 @@ impl SkillStore {
 
     // ── Settings ──
 
+    pub fn proxy_url(&self) -> Option<String> {
+        self.get_setting("proxy_url").ok().flatten().filter(|s| !s.is_empty())
+    }
+
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;

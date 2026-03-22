@@ -301,6 +301,7 @@
     "proxyUrlDesc": "设置后，所有 Git 拉取和网络请求均通过此代理出口。留空则直连。",
     "proxyUrlPlaceholder": "http://127.0.0.1:7890",
     "proxyUrlSaved": "代理设置已保存",
+    "proxyUrlInvalid": "代理地址必须以 http://、https:// 或 socks5:// 开头",
     "gitSyncConfig": "Git 同步配置",
     "gitSyncConfigDesc": "这里只保存远程仓库地址等偏好；初始化与同步操作请在“我的 Skills”页面执行。",
     "gitConfigSaved": "Git 同步配置已保存",

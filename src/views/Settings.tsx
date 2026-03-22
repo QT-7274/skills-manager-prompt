@@ -198,9 +198,14 @@ export function Settings() {
   };
 
   const handleSaveProxy = async () => {
+    const trimmed = proxyInput.trim();
+    if (trimmed && !/^(https?|socks5):\/\//i.test(trimmed)) {
+      toast.error(t("settings.proxyUrlInvalid"));
+      return;
+    }
     setProxySaving(true);
     try {
-      await api.setSettings("proxy_url", proxyInput.trim());
+      await api.setSettings("proxy_url", trimmed);
       toast.success(t("settings.proxyUrlSaved"));
     } catch {
       toast.error(t("common.error"));

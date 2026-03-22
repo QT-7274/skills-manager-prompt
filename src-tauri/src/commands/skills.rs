@@ -253,7 +253,7 @@ pub async fn install_git(
 ) -> Result<(), AppError> {
     git_fetcher::validate_git_url(&repo_url).map_err(AppError::git)?;
     let store = store.inner().clone();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     let registry = cancel_registry.inner().clone();
     let cancel_key = repo_url.clone();
     let cancel = registry.register(&cancel_key);
@@ -313,7 +313,7 @@ pub async fn install_from_skillssh(
     app_handle: tauri::AppHandle,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     let registry = cancel_registry.inner().clone();
     let cancel_key_owned = format!("{}/{}", source, skill_id);
     let cancel = registry.register(&cancel_key_owned);
@@ -375,7 +375,7 @@ pub async fn check_skill_update(
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<ManagedSkillDto, AppError> {
     let store = store.inner().clone();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
         check_skill_update_internal(&store, &skill_id, force.unwrap_or(false), proxy_url.as_deref())
     })
@@ -388,7 +388,7 @@ pub async fn check_all_skill_updates(
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
         let force_check = force.unwrap_or(false);
         let ids: Vec<String> = store
@@ -425,7 +425,7 @@ pub async fn update_skill(
     cancel_registry: State<'_, Arc<InstallCancelRegistry>>,
 ) -> Result<ManagedSkillDto, AppError> {
     let store = store.inner().clone();
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     let registry = cancel_registry.inner().clone();
     let cancel_key = format!("update:{}", skill_id);
     let cancel = registry.register(&cancel_key);

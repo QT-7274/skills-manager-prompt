@@ -23,7 +23,7 @@ pub async fn fetch_leaderboard(
         }
     }
 
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     let board_type = LeaderboardType::from_str(&board);
     let skills = tauri::async_runtime::spawn_blocking(move || {
         skillssh_api::fetch_leaderboard(board_type, proxy_url.as_deref()).map_err(AppError::network)
@@ -44,7 +44,7 @@ pub async fn search_skillssh(
     limit: Option<usize>,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<Vec<SkillsShSkill>, AppError> {
-    let proxy_url = store.get_setting("proxy_url").ok().flatten();
+    let proxy_url = store.proxy_url();
     let requested = limit.unwrap_or(60);
     let bounded = requested.clamp(1, 300);
     tauri::async_runtime::spawn_blocking(move || {

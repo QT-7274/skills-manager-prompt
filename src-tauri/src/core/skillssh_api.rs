@@ -37,9 +37,10 @@ impl LeaderboardType {
     }
 }
 
-fn build_client(proxy_url: Option<&str>) -> reqwest::blocking::Client {
+pub fn build_http_client(proxy_url: Option<&str>, timeout_secs: u64) -> reqwest::blocking::Client {
     let mut builder = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15));
+        .user_agent("skills-manager")
+        .timeout(std::time::Duration::from_secs(timeout_secs));
     if let Some(proxy) = proxy_url.filter(|s| !s.is_empty()) {
         if let Ok(p) = reqwest::Proxy::all(proxy) {
             builder = builder.proxy(p);
@@ -49,11 +50,10 @@ fn build_client(proxy_url: Option<&str>) -> reqwest::blocking::Client {
 }
 
 pub fn fetch_leaderboard(board: LeaderboardType, proxy_url: Option<&str>) -> Result<Vec<SkillsShSkill>> {
-    let client = build_client(proxy_url);
+    let client = build_http_client(proxy_url, 15);
 
     let html = client
         .get(board.url())
-        .header("User-Agent", "skills-manager/1.0.0")
         .send()
         .context("Failed to fetch skills.sh")?
         .text()
@@ -215,7 +215,7 @@ fn parse_embedded_with_regex(html: &str, pattern: &Regex) -> Vec<SkillsShSkill> 
 }
 
 pub fn search_skills(query: &str, limit: usize, proxy_url: Option<&str>) -> Result<Vec<SkillsShSkill>> {
-    let client = build_client(proxy_url);
+    let client = build_http_client(proxy_url, 15);
 
     let url = format!(
         "https://skills.sh/api/search?q={}&limit={}",
@@ -225,7 +225,6 @@ pub fn search_skills(query: &str, limit: usize, proxy_url: Option<&str>) -> Resu
 
     let resp: serde_json::Value = client
         .get(&url)
-        .header("User-Agent", "skills-manager/1.0.0")
         .send()
         .context("Failed to search skills.sh")?
         .json()

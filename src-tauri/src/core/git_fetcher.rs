@@ -199,7 +199,11 @@ pub fn resolve_remote_revision(url: &str, branch: Option<&str>, proxy_url: Optio
         uuid::Uuid::new_v4()
     )))?;
     let mut remote = repo.remote_anonymous(url)?;
-    remote.connect(Direction::Fetch)?;
+    let mut proxy_opts = git2::ProxyOptions::new();
+    if let Some(proxy) = proxy_url.filter(|s| !s.is_empty()) {
+        proxy_opts.url(proxy);
+    }
+    remote.connect_auth(Direction::Fetch, None, Some(proxy_opts))?;
     let refs = remote.list()?;
 
     if let Some(branch) = branch {
