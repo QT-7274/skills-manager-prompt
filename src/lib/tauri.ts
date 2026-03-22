@@ -162,6 +162,9 @@ export const previewGitInstall = (repoUrl: string) =>
 export const confirmGitInstall = (repoUrl: string, tempDir: string, items: SkillInstallItem[]) =>
   invoke<void>("confirm_git_install", { repoUrl, tempDir, items });
 
+export const cancelGitPreview = (tempDir: string) =>
+  invoke<void>("cancel_git_preview", { tempDir });
+
 export const installFromSkillssh = (source: string, skillId: string) =>
   invoke<void>("install_from_skillssh", { source, skillId });
 

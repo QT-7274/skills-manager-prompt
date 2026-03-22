@@ -406,6 +406,14 @@ export function InstallSkills() {
     }
   };
 
+  const handleGitPreviewClose = () => {
+    if (gitPreview) {
+      api.cancelGitPreview(gitPreview.temp_dir).catch(() => {});
+    }
+    setGitPreview(null);
+    setGitSelections([]);
+  };
+
   const handleGitConfirm = async () => {
     if (!gitPreview) return;
     const selected = gitSelections.filter((s) => s.selected);
@@ -1099,13 +1107,13 @@ export function InstallSkills() {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => { setGitPreview(null); setGitSelections([]); }}
+            onClick={handleGitPreviewClose}
           />
           <div className="relative w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-[14px] font-semibold text-primary">{t("install.gitPreview.title")}</h2>
               <button
-                onClick={() => { setGitPreview(null); setGitSelections([]); }}
+                onClick={handleGitPreviewClose}
                 className="rounded p-1 text-muted transition-colors hover:text-secondary"
               >
                 <X className="h-4 w-4" />
@@ -1181,7 +1189,7 @@ export function InstallSkills() {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => { setGitPreview(null); setGitSelections([]); }}
+                onClick={handleGitPreviewClose}
                 className="px-3 py-1.5 text-[13px] font-medium text-muted hover:text-secondary transition-colors"
               >
                 {t("common.cancel")}
