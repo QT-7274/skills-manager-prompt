@@ -80,7 +80,7 @@ jobs:
           echo "" >> "$GITHUB_OUTPUT"
           echo "---" >> "$GITHUB_OUTPUT"
           echo "" >> "$GITHUB_OUTPUT"
-          echo "<details><summary>🇨🇳 中文更新日志</summary>" >> "$GITHUB_OUTPUT"
+          echo "<details><summary>中文更新日志</summary>" >> "$GITHUB_OUTPUT"
           echo "" >> "$GITHUB_OUTPUT"
           echo "$BODY_ZH" >> "$GITHUB_OUTPUT"
           echo "" >> "$GITHUB_OUTPUT"
