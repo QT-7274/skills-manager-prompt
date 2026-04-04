@@ -58,6 +58,64 @@ pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMo
     }
 }
 
+/// Optimized version: assumes parent directories already created, skips unnecessary remove for new symlinks
+pub fn sync_skill_fast(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMode> {
+    match mode {
+        SyncMode::Symlink => {
+            #[cfg(unix)]
+            {
+                // Optimistic: try symlink first. If it fails because target exists, remove and retry.
+                match std::os::unix::fs::symlink(source, target) {
+                    Ok(()) => return Ok(SyncMode::Symlink),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        remove_target(target).ok();
+                        std::os::unix::fs::symlink(source, target).with_context(|| {
+                            format!("Failed to create symlink {:?} -> {:?}", target, source)
+                        })?;
+                        return Ok(SyncMode::Symlink);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // Parent dir doesn't exist — create it and retry
+                        if let Some(parent) = target.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::os::unix::fs::symlink(source, target).with_context(|| {
+                            format!("Failed to create symlink {:?} -> {:?}", target, source)
+                        })?;
+                        return Ok(SyncMode::Symlink);
+                    }
+                    Err(e) => {
+                        return Err(e).with_context(|| {
+                            format!("Failed to create symlink {:?} -> {:?}", target, source)
+                        });
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                // Windows: fall back to copy
+                remove_target(target).ok();
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                copy_dir_recursive(source, target)?;
+                Ok(SyncMode::Copy)
+            }
+        }
+        SyncMode::Copy => {
+            // For copy: remove existing target if any, then copy
+            remove_target(target).ok();
+            if let Some(parent) = target.parent() {
+                if !parent.exists() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            copy_dir_recursive(source, target)?;
+            Ok(SyncMode::Copy)
+        }
+    }
+}
+
 pub fn remove_target(target: &Path) -> Result<()> {
     if target.is_symlink() {
         std::fs::remove_file(target)?;
@@ -82,9 +140,16 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
             }
             copy_dir_recursive(&entry.path(), &dest_path)?;
         } else {
-            std::fs::copy(entry.path(), &dest_path)?;
+            copy_file_fast(&entry.path(), &dest_path)?;
         }
     }
+    Ok(())
+}
+
+/// Copy a single file using std::fs::copy.
+fn copy_file_fast(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::copy(src, dst)
+        .with_context(|| format!("Failed to copy {:?} -> {:?}", src, dst))?;
     Ok(())
 }
 
