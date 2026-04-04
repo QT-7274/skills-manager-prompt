@@ -453,6 +453,12 @@ export const getScenarioSkillOrder = (scenarioId: string) =>
 export const reorderScenarioSkills = (scenarioId: string, skillIds: string[]) =>
   invoke<void>("reorder_scenario_skills", { scenarioId, skillIds });
 
+export const saveScenarioPromptTemplate = (scenarioId: string, template: string | null) =>
+  invoke<void>("save_scenario_prompt_template", { scenarioId, template });
+
+export const getScenarioPromptTemplate = (scenarioId: string) =>
+  invoke<string | null>("get_scenario_prompt_template", { scenarioId });
+
 // ── Projects ──
 
 export const getProjects = () => invoke<Project[]>("get_projects");

@@ -21,6 +21,8 @@ import {
   SquareCheck,
   Square,
   GripVertical,
+  FileText,
+  ArrowLeft,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -32,6 +34,8 @@ import { OnlineMatchDialog } from "../components/OnlineMatchDialog";
 import { BatchOnlineMatchDialog, type BatchMatchItem } from "../components/BatchOnlineMatchDialog";
 import { SkillDetailPanel } from "../components/SkillDetailPanel";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
+import { ScenarioPromptEditor, extractUsedSkillNames } from "../components/ScenarioPromptEditor";
+import type { ScenarioPromptEditorHandle } from "../components/ScenarioPromptEditor";
 import * as api from "../lib/tauri";
 import type {
   ManagedSkill,
@@ -157,10 +161,27 @@ export function MySkills() {
   const [tagEditSkillId, setTagEditSkillId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const [isPromptEditorMode, setIsPromptEditorMode] = useState(false);
+  const prevActiveScenarioIdRef = useRef<string | null>(null);
+  const promptEditorRef = useRef<ScenarioPromptEditorHandle>(null);
+  const [promptUsedSkillNames, setPromptUsedSkillNames] = useState<Set<string>>(new Set());
 
   const [scenarioSkillOrder, setScenarioSkillOrder] = useState<string[]>([]);
 
   const activeScenarioName = activeScenario?.name || t("mySkills.currentScenarioFallback");
+
+  // Reset prompt editor when scenario changes
+  useEffect(() => {
+    if (activeScenario?.id !== prevActiveScenarioIdRef.current) {
+      setIsPromptEditorMode(false);
+      setPromptUsedSkillNames(new Set());
+      prevActiveScenarioIdRef.current = activeScenario?.id ?? null;
+    }
+  }, [activeScenario?.id]);
+
+  const handlePromptTemplateChange = useCallback((template: string) => {
+    setPromptUsedSkillNames(extractUsedSkillNames(template));
+  }, []);
 
   // Fetch sort order whenever active scenario changes
   useEffect(() => {
@@ -992,6 +1013,18 @@ export function MySkills() {
           >
             <SquareCheck className="h-4 w-4" />
           </button>
+          {activeScenario && (
+            <button
+              onClick={() => setIsPromptEditorMode(!isPromptEditorMode)}
+              className={cn(
+                "rounded-md p-2 transition-colors outline-none",
+                isPromptEditorMode ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
+              )}
+              title={t("mySkills.promptEditor.toggleButton")}
+            >
+              <FileText className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1128,7 +1161,25 @@ export function MySkills() {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {isPromptEditorMode && activeScenario ? (
+        <div className="flex-1 overflow-auto">
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <button
+              onClick={() => setIsPromptEditorMode(false)}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {t("mySkills.promptEditor.backToSkills")}
+            </button>
+          </div>
+          <ScenarioPromptEditor
+            ref={promptEditorRef}
+            scenarioId={activeScenario.id}
+            onExit={() => setIsPromptEditorMode(false)}
+            onTemplateChange={handlePromptTemplateChange}
+          />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center pb-20 text-center">
           <Layers className="mb-4 h-12 w-12 text-faint" />
           <h3 className="mb-1.5 text-[14px] font-semibold text-tertiary">{t("mySkills.noSkills")}</h3>

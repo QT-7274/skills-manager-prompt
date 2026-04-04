@@ -68,6 +68,7 @@ pub struct ScenarioRecord {
     pub description: Option<String>,
     pub icon: Option<String>,
     pub sort_order: i32,
+    pub prompt_template: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -612,7 +613,7 @@ impl SkillStore {
     pub fn get_all_scenarios(&self) -> Result<Vec<ScenarioRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, icon, sort_order, created_at, updated_at FROM scenarios ORDER BY sort_order, created_at",
+            "SELECT id, name, description, icon, sort_order, prompt_template, created_at, updated_at FROM scenarios ORDER BY sort_order, created_at",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(ScenarioRecord {
@@ -621,8 +622,9 @@ impl SkillStore {
                 description: row.get(2)?,
                 icon: row.get(3)?,
                 sort_order: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                prompt_template: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -648,6 +650,30 @@ impl SkillStore {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM scenarios WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    pub fn save_scenario_prompt_template(
+        &self,
+        scenario_id: &str,
+        template: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE scenarios SET prompt_template = ?1, updated_at = ?2 WHERE id = ?3",
+            params![template, now, scenario_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_scenario_prompt_template(&self, scenario_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT prompt_template FROM scenarios WHERE id = ?1",
+            params![scenario_id],
+            |row| row.get(0),
+        )?;
+        Ok(result)
     }
 
     pub fn reorder_scenarios(&self, ids: &[String]) -> Result<()> {

@@ -196,7 +196,18 @@
     "batchEnable": "Enable {{count}}",
     "batchDisable": "Disable {{count}}",
     "batchEnabled": "{{count}} skills enabled",
-    "batchDisabled": "{{count}} skills disabled"
+    "batchDisabled": "{{count}} skills disabled",
+    "promptEditor": {
+      "title": "Prompt Template",
+      "placeholder": "Write your prompt template here... Use [skill::name] to reference skills.",
+      "saved": "Prompt template saved",
+      "cleared": "Prompt template cleared",
+      "skillTag": "Insert skill reference",
+      "noSkills": "No skills available to insert",
+      "usedSkills": "Referenced skills",
+      "toggleButton": "Prompt Editor",
+      "backToSkills": "Back to Skills"
+    }
   },
   "install": {
     "title": "Install Skills",

@@ -144,6 +144,7 @@ pub async fn create_scenario(
             description: description.clone(),
             icon: icon.clone(),
             sort_order: 999,
+            prompt_template: None,
             created_at: now,
             updated_at: now,
         };
@@ -606,4 +607,34 @@ pub(crate) fn unsync_scenario_skills(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn save_scenario_prompt_template(
+    scenario_id: String,
+    template: Option<String>,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_scenario_exists(&store, &scenario_id)?;
+        store
+            .save_scenario_prompt_template(&scenario_id, template.as_deref())
+            .map_err(AppError::db)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn get_scenario_prompt_template(
+    scenario_id: String,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<Option<String>, AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .get_scenario_prompt_template(&scenario_id)
+            .map_err(AppError::db)
+    })
+    .await?
 }

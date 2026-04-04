@@ -235,6 +235,15 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
             override_skills_dir: None,
             is_custom: false,
         },
+        ToolAdapter {
+            key: "codebuddy".into(),
+            display_name: "CodeBuddy".into(),
+            relative_skills_dir: ".codebuddy/skills".into(),
+            relative_detect_dir: ".codebuddy".into(),
+            additional_scan_dirs: vec![],
+            override_skills_dir: None,
+            is_custom: false,
+        },
     ]
 }
 

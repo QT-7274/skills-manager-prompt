@@ -196,7 +196,18 @@
     "batchEnable": "启用 {{count}} 个",
     "batchDisable": "停用 {{count}} 个",
     "batchEnabled": "已启用 {{count}} 个 Skill",
-    "batchDisabled": "已停用 {{count}} 个 Skill"
+    "batchDisabled": "已停用 {{count}} 个 Skill",
+    "promptEditor": {
+      "title": "提示词模板",
+      "placeholder": "在此编写提示词模板... 使用 [skill::名称] 引用 Skill。",
+      "saved": "提示词模板已保存",
+      "cleared": "提示词模板已清除",
+      "skillTag": "插入 Skill 引用",
+      "noSkills": "没有可插入的 Skill",
+      "usedSkills": "已引用的 Skills",
+      "toggleButton": "提示词编辑器",
+      "backToSkills": "返回 Skills"
+    }
   },
   "install": {
     "title": "安装 Skills",
