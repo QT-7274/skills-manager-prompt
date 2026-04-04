@@ -101,8 +101,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const handleSwitchScenario = useCallback(
     async (id: string) => {
       try {
+        const t0 = performance.now();
         await api.switchScenario(id);
+        console.log(`[perf] switchScenario IPC: ${(performance.now() - t0).toFixed(0)}ms`);
+        
+        const t1 = performance.now();
         await Promise.all([refreshScenarios(), refreshManagedSkills()]);
+        console.log(`[perf] refreshScenarios+refreshManagedSkills: ${(performance.now() - t1).toFixed(0)}ms`);
+        console.log(`[perf] TOTAL switch: ${(performance.now() - t0).toFixed(0)}ms`);
+        
         setAppError(null);
       } catch (e) {
         console.error("Failed to switch scenario:", e);

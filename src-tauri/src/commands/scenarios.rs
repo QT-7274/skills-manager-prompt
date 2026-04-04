@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,10 +6,10 @@ use tauri::State;
 
 use crate::core::{
     error::AppError,
-    skill_store::{ScenarioRecord, SkillStore},
+    skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
     sync_engine, tool_adapters,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn refresh_tray_menu_best_effort(app: &tauri::AppHandle) {
     if let Err(err) = crate::refresh_tray_menu(app) {
@@ -69,6 +70,7 @@ pub async fn get_scenarios(
 ) -> Result<Vec<ScenarioDto>, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let t_total = std::time::Instant::now();
         let scenarios = store.get_all_scenarios().map_err(AppError::db)?;
         let mut result = Vec::new();
         for s in scenarios {
@@ -84,6 +86,7 @@ pub async fn get_scenarios(
                 updated_at: s.updated_at,
             });
         }
+        log::info!("[get_scenarios] TOTAL ({} scenarios): {:?}", result.len(), t_total.elapsed());
         Ok(result)
     })
     .await?
@@ -95,12 +98,14 @@ pub async fn get_active_scenario(
 ) -> Result<Option<ScenarioDto>, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let t_total = std::time::Instant::now();
         let active_id = store.get_active_scenario_id().map_err(AppError::db)?;
 
         if let Some(id) = active_id {
             let scenarios = store.get_all_scenarios().map_err(AppError::db)?;
             if let Some(s) = scenarios.into_iter().find(|s| s.id == id) {
                 let count = store.count_skills_for_scenario(&s.id).unwrap_or(0);
+                log::info!("[get_active_scenario] TOTAL: {:?}", t_total.elapsed());
                 return Ok(Some(ScenarioDto {
                     id: s.id,
                     name: s.name,
@@ -113,6 +118,7 @@ pub async fn get_active_scenario(
                 }));
             }
         }
+        log::info!("[get_active_scenario] TOTAL (no active): {:?}", t_total.elapsed());
         Ok(None)
     })
     .await?
@@ -235,29 +241,40 @@ pub async fn switch_scenario(
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let store_bg = store.clone();
+    let id_bg = id.clone();
+
+    // Phase 1: DB-only operations (fast) — synchronous
+    tauri::async_runtime::spawn_blocking(move || {
         ensure_scenario_exists(&store, &id)?;
 
-        // Unsync old scenario skills
+        // Unsync old scenario skills — file removal
         if let Ok(Some(old_id)) = store.get_active_scenario_id() {
             if old_id != id {
+                let t0 = std::time::Instant::now();
                 unsync_scenario_skills(&store, &old_id)?;
+                log::info!("unsync_scenario_skills took {:?}", t0.elapsed());
             }
         }
 
-        // Set new active
+        // Set new active scenario in DB
         store.set_active_scenario(&id).map_err(AppError::db)?;
 
-        // Sync new scenario skills
-        sync_scenario_skills(&store, &id)?;
-
-        Ok(())
+        Ok::<(), AppError>(())
     })
-    .await?;
-    if result.is_ok() {
-        refresh_tray_menu_best_effort(&app);
-    }
-    result
+    .await??;
+
+    // Phase 2: File sync in background — don't block the UI
+    tauri::async_runtime::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
+        if let Err(e) = sync_scenario_skills(&store_bg, &id_bg) {
+            log::error!("Background sync_scenario_skills failed: {e}");
+        }
+        log::info!("sync_scenario_skills (background) took {:?}", t0.elapsed());
+    });
+
+    refresh_tray_menu_best_effort(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -417,45 +434,144 @@ pub async fn reorder_scenario_skills(
 // ── Internal helpers ──
 
 pub(crate) fn sync_scenario_skills(store: &SkillStore, scenario_id: &str) -> Result<(), AppError> {
+    let t_total = std::time::Instant::now();
+
     let skills = store
         .get_skills_for_scenario(scenario_id)
         .map_err(AppError::db)?;
+    if skills.is_empty() {
+        return Ok(());
+    }
+
     let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
 
+    // 1. Pre-compute: get all enabled & installed adapters once
+    let t0 = std::time::Instant::now();
+    let all_adapters = tool_adapters::enabled_installed_adapters(store);
+    let adapter_keys: Vec<String> = all_adapters.iter().map(|a| a.key.clone()).collect();
+    log::info!("[sync] step1 adapters ({} enabled): {:?}", all_adapters.len(), t0.elapsed());
+
+    // Pre-create adapter skills directories to avoid repeated create_dir_all calls
+    let t0 = std::time::Instant::now();
+    for adapter in &all_adapters {
+        let skills_dir = adapter.skills_dir();
+        if let Some(parent) = skills_dir.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    log::info!("[sync] pre-create adapter dirs: {:?}", t0.elapsed());
+
+    // 2. Batch ensure defaults for all skills in one transaction
+    let t0 = std::time::Instant::now();
+    let skill_ids: Vec<String> = skills.iter().map(|s| s.id.clone()).collect();
+    store
+        .ensure_scenario_skill_tool_defaults_batch(scenario_id, &skill_ids, &adapter_keys)
+        .map_err(AppError::db)?;
+    log::info!("[sync] step2 ensure defaults: {:?}", t0.elapsed());
+
+    // 3. Batch query: which tools are enabled for each skill
+    let t0 = std::time::Instant::now();
+    let enabled_map: HashMap<String, Vec<String>> = store
+        .get_enabled_tools_for_scenario_skills_batch(scenario_id, &skill_ids)
+        .map_err(AppError::db)?;
+    log::info!("[sync] step3 query enabled tools: {:?}", t0.elapsed());
+
+    // 4. Build sync tasks
+    struct SyncTask {
+        source: PathBuf,
+        target: PathBuf,
+        mode: sync_engine::SyncMode,
+        skill_id: String,
+        tool_key: String,
+    }
+
+    let t0 = std::time::Instant::now();
+    let mut sync_tasks = Vec::new();
     for skill in &skills {
         let source = PathBuf::from(&skill.central_path);
-        let adapters =
-            enabled_installed_adapters_for_scenario_skill(store, scenario_id, &skill.id)?;
-        for adapter in &adapters {
-            let target = adapter.skills_dir().join(&skill.name);
-            let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
-            match sync_engine::sync_skill(&source, &target, mode) {
-                Ok(actual_mode) => {
-                    let now = chrono::Utc::now().timestamp_millis();
-                    let target_record = crate::core::skill_store::SkillTargetRecord {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        skill_id: skill.id.clone(),
-                        tool: adapter.key.clone(),
-                        target_path: target.to_string_lossy().to_string(),
-                        mode: actual_mode.as_str().to_string(),
-                        status: "ok".to_string(),
-                        synced_at: Some(now),
-                        last_error: None,
-                    };
-                    if let Err(e) = store.insert_target(&target_record) {
-                        log::warn!("Failed to insert sync target for skill {}: {e}", skill.id);
-                    }
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to sync skill {} to {}: {e}",
-                        skill.id,
-                        target.display()
+        let enabled_tools = enabled_map.get(&skill.id);
+        if let Some(tools) = enabled_tools {
+            let enabled_set: HashSet<&str> = tools.iter().map(|s| s.as_str()).collect();
+            for adapter in &all_adapters {
+                if enabled_set.contains(adapter.key.as_str()) {
+                    let target = adapter.skills_dir().join(&skill.name);
+                    let mode = sync_engine::sync_mode_for_tool(
+                        &adapter.key,
+                        configured_mode.as_deref(),
                     );
+                    sync_tasks.push(SyncTask {
+                        source: source.clone(),
+                        target,
+                        mode,
+                        skill_id: skill.id.clone(),
+                        tool_key: adapter.key.clone(),
+                    });
                 }
             }
         }
     }
+    let symlink_count = sync_tasks.iter().filter(|t| matches!(t.mode, sync_engine::SyncMode::Symlink)).count();
+    let copy_count = sync_tasks.iter().filter(|t| matches!(t.mode, sync_engine::SyncMode::Copy)).count();
+    log::info!("[sync] step4 build tasks: {} total ({} symlink, {} copy): {:?}",
+        sync_tasks.len(), symlink_count, copy_count, t0.elapsed());
+
+    // 5. Parallel file sync (optimized: no create_dir_all per task, no remove before symlink if target doesn't exist)
+    let t0 = std::time::Instant::now();
+    let symlink_time = std::sync::atomic::AtomicU64::new(0);
+    let copy_time = std::sync::atomic::AtomicU64::new(0);
+    let sync_results: Vec<_> = sync_tasks
+        .par_iter()
+        .map(|task| {
+            let t_op = std::time::Instant::now();
+            let result = sync_engine::sync_skill_fast(&task.source, &task.target, task.mode);
+            let elapsed = t_op.elapsed().as_micros() as u64;
+            match task.mode {
+                sync_engine::SyncMode::Symlink => symlink_time.fetch_add(elapsed, std::sync::atomic::Ordering::Relaxed),
+                sync_engine::SyncMode::Copy => copy_time.fetch_add(elapsed, std::sync::atomic::Ordering::Relaxed),
+            };
+            (task, result)
+        })
+        .collect();
+    let sym_us = symlink_time.load(std::sync::atomic::Ordering::Relaxed);
+    let cp_us = copy_time.load(std::sync::atomic::Ordering::Relaxed);
+    log::info!("[sync] step5 parallel file sync: {:?} (symlink cumulative: {}ms, copy cumulative: {}ms)",
+        t0.elapsed(), sym_us / 1000, cp_us / 1000);
+    log::info!("[sync] step5 avg: symlink={:.1}ms/op, copy={:.1}ms/op",
+        sym_us as f64 / symlink_count.max(1) as f64 / 1000.0,
+        cp_us as f64 / copy_count.max(1) as f64 / 1000.0);
+
+    // 6. Batch insert target records in one transaction
+    let t0 = std::time::Instant::now();
+    let now = chrono::Utc::now().timestamp_millis();
+    let target_records: Vec<SkillTargetRecord> = sync_results
+        .iter()
+        .filter_map(|(task, result)| match result {
+            Ok(actual_mode) => Some(SkillTargetRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                skill_id: task.skill_id.clone(),
+                tool: task.tool_key.clone(),
+                target_path: task.target.to_string_lossy().to_string(),
+                mode: actual_mode.as_str().to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(now),
+                last_error: None,
+            }),
+            Err(e) => {
+                log::warn!(
+                    "Failed to sync skill {} to {}: {e}",
+                    task.skill_id,
+                    task.target.display()
+                );
+                None
+            }
+        })
+        .collect();
+
+    if let Err(e) = store.insert_targets_batch(&target_records) {
+        log::warn!("Failed to batch-insert sync targets: {e}");
+    }
+    log::info!("[sync] step6 batch insert DB: {:?}", t0.elapsed());
+    log::info!("[sync] TOTAL: {:?}", t_total.elapsed());
 
     Ok(())
 }
@@ -467,21 +583,26 @@ pub(crate) fn unsync_scenario_skills(
     let skill_ids = store
         .get_skill_ids_for_scenario(scenario_id)
         .map_err(AppError::db)?;
+    if skill_ids.is_empty() {
+        return Ok(());
+    }
 
-    for skill_id in &skill_ids {
-        let targets = store.get_targets_for_skill(skill_id).unwrap_or_default();
-        for target in &targets {
-            let path = PathBuf::from(&target.target_path);
-            if let Err(e) = sync_engine::remove_target(&path) {
-                log::warn!("Failed to remove sync target {}: {e}", path.display());
-            }
-            if let Err(e) = store.delete_target(skill_id, &target.tool) {
-                log::warn!(
-                    "Failed to delete target record for skill {skill_id}, tool {}: {e}",
-                    target.tool
-                );
-            }
+    // 1. Batch query: get all targets for all skills at once
+    let all_targets = store
+        .get_targets_for_skills(&skill_ids)
+        .unwrap_or_default();
+
+    // 2. Parallel file removal
+    all_targets.par_iter().for_each(|target| {
+        let path = PathBuf::from(&target.target_path);
+        if let Err(e) = sync_engine::remove_target(&path) {
+            log::warn!("Failed to remove sync target {}: {e}", path.display());
         }
+    });
+
+    // 3. Batch delete DB records in one transaction
+    if let Err(e) = store.delete_targets_for_skills_batch(&skill_ids) {
+        log::warn!("Failed to batch-delete target records: {e}");
     }
 
     Ok(())

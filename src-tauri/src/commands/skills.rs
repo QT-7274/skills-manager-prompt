@@ -118,13 +118,35 @@ pub async fn get_managed_skills(
 ) -> Result<Vec<ManagedSkillDto>, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let t_total = std::time::Instant::now();
+        
+        let t0 = std::time::Instant::now();
         let skills = store.get_all_skills().map_err(AppError::db)?;
+        log::info!("[get_managed_skills] get_all_skills ({} skills): {:?}", skills.len(), t0.elapsed());
+        
+        let t0 = std::time::Instant::now();
         let all_targets = store.get_all_targets().map_err(AppError::db)?;
+        log::info!("[get_managed_skills] get_all_targets ({} targets): {:?}", all_targets.len(), t0.elapsed());
+        
+        let t0 = std::time::Instant::now();
         let tags_map = store.get_tags_map().map_err(AppError::db)?;
-        Ok(skills
+        log::info!("[get_managed_skills] get_tags_map: {:?}", t0.elapsed());
+        
+        // Batch query: get scenarios for all skills in a single DB call
+        let t0 = std::time::Instant::now();
+        let skill_ids: Vec<String> = skills.iter().map(|s| s.id.clone()).collect();
+        let scenarios_map = store.get_all_skill_scenarios(&skill_ids).map_err(AppError::db)?;
+        log::info!("[get_managed_skills] get_all_skill_scenarios: {:?}", t0.elapsed());
+        
+        let t0 = std::time::Instant::now();
+        let result: Vec<ManagedSkillDto> = skills
             .into_iter()
-            .map(|skill| managed_skill_to_dto(&store, skill, &all_targets, &tags_map))
-            .collect())
+            .map(|skill| managed_skill_to_dto(skill, &all_targets, &tags_map, &scenarios_map))
+            .collect();
+        log::info!("[get_managed_skills] dto mapping: {:?}", t0.elapsed());
+        
+        log::info!("[get_managed_skills] TOTAL: {:?}", t_total.elapsed());
+        Ok(result)
     })
     .await?
 }
@@ -141,10 +163,14 @@ pub async fn get_skills_for_scenario(
             .map_err(AppError::db)?;
         let all_targets = store.get_all_targets().map_err(AppError::db)?;
         let tags_map = store.get_tags_map().map_err(AppError::db)?;
+        
+        // Batch query: get scenarios for all skills in a single DB call
+        let skill_ids: Vec<String> = skills.iter().map(|s| s.id.clone()).collect();
+        let scenarios_map = store.get_all_skill_scenarios(&skill_ids).map_err(AppError::db)?;
 
         Ok(skills
             .into_iter()
-            .map(|skill| managed_skill_to_dto(&store, skill, &all_targets, &tags_map))
+            .map(|skill| managed_skill_to_dto(skill, &all_targets, &tags_map, &scenarios_map))
             .collect())
     })
     .await?
@@ -800,10 +826,10 @@ pub async fn reimport_local_skill(
 }
 
 fn managed_skill_to_dto(
-    store: &SkillStore,
     skill: SkillRecord,
     all_targets: &[SkillTargetRecord],
     tags_map: &std::collections::HashMap<String, Vec<String>>,
+    scenarios_map: &std::collections::HashMap<String, Vec<String>>,
 ) -> ManagedSkillDto {
     let targets = all_targets
         .iter()
@@ -819,7 +845,7 @@ fn managed_skill_to_dto(
         })
         .collect();
 
-    let scenario_ids = store.get_scenarios_for_skill(&skill.id).unwrap_or_default();
+    let scenario_ids = scenarios_map.get(&skill.id).cloned().unwrap_or_default();
     let tags = tags_map.get(&skill.id).cloned().unwrap_or_default();
 
     ManagedSkillDto {
@@ -851,7 +877,13 @@ fn managed_skill_by_id(store: &SkillStore, skill_id: &str) -> Result<ManagedSkil
         .ok_or_else(|| AppError::not_found("Skill not found"))?;
     let all_targets = store.get_all_targets().map_err(AppError::db)?;
     let tags_map = store.get_tags_map().map_err(AppError::db)?;
-    Ok(managed_skill_to_dto(store, skill, &all_targets, &tags_map))
+    
+    // For single skill, use get_scenarios_for_skill directly
+    let scenario_ids = store.get_scenarios_for_skill(skill_id).unwrap_or_default();
+    let mut scenarios_map = std::collections::HashMap::new();
+    scenarios_map.insert(skill_id.to_string(), scenario_ids);
+    
+    Ok(managed_skill_to_dto(skill, &all_targets, &tags_map, &scenarios_map))
 }
 
 fn store_installed_skill(

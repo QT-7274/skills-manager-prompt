@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -751,6 +752,36 @@ impl SkillStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Batch query: get scenario IDs for multiple skills in a single DB call
+    pub fn get_all_skill_scenarios(&self, skill_ids: &[String]) -> Result<HashMap<String, Vec<String>>> {
+        if skill_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let placeholders = skill_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query = format!(
+            "SELECT skill_id, scenario_id FROM scenario_skills WHERE skill_id IN ({})",
+            placeholders
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> = skill_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row_result in rows {
+            if let Ok((skill_id, scenario_id)) = row_result {
+                map.entry(skill_id).or_insert_with(Vec::new).push(scenario_id);
+            }
+        }
+
+        Ok(map)
+    }
+
     pub fn ensure_scenario_skill_tool_defaults(
         &self,
         scenario_id: &str,
@@ -942,6 +973,157 @@ impl SkillStore {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    // ── Batch / Transaction helpers (for scenario switch optimization) ──
+
+    /// Execute a closure inside a single database transaction.
+    #[allow(dead_code)]
+    pub fn with_transaction<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&Connection) -> Result<T>,
+    {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    /// Get targets for multiple skills in a single query.
+    pub fn get_targets_for_skills(&self, skill_ids: &[String]) -> Result<Vec<SkillTargetRecord>> {
+        if skill_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error \
+             FROM skill_targets WHERE skill_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = skill_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::ToSql)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok(SkillTargetRecord {
+                id: row.get(0)?,
+                skill_id: row.get(1)?,
+                tool: row.get(2)?,
+                target_path: row.get(3)?,
+                mode: row.get(4)?,
+                status: row.get(5)?,
+                synced_at: row.get(6)?,
+                last_error: row.get(7)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Batch-delete all targets for the given skill IDs in a single transaction.
+    pub fn delete_targets_for_skills_batch(&self, skill_ids: &[String]) -> Result<()> {
+        if skill_ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        for skill_id in skill_ids {
+            tx.execute(
+                "DELETE FROM skill_targets WHERE skill_id = ?1",
+                params![skill_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch-insert targets in a single transaction.
+    pub fn insert_targets_batch(&self, targets: &[SkillTargetRecord]) -> Result<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        for target in targets {
+            tx.execute(
+                "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    target.id,
+                    target.skill_id,
+                    target.tool,
+                    target.target_path,
+                    target.mode,
+                    target.status,
+                    target.synced_at,
+                    target.last_error,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch ensure defaults for multiple skills in a single transaction.
+    pub fn ensure_scenario_skill_tool_defaults_batch(
+        &self,
+        scenario_id: &str,
+        skill_ids: &[String],
+        tools: &[String],
+    ) -> Result<()> {
+        if skill_ids.is_empty() || tools.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let now = chrono::Utc::now().timestamp_millis();
+        for skill_id in skill_ids {
+            for tool in tools {
+                tx.execute(
+                    "INSERT OR IGNORE INTO scenario_skill_tools (scenario_id, skill_id, tool, enabled, updated_at) \
+                     VALUES (?1, ?2, ?3, 1, ?4)",
+                    params![scenario_id, skill_id, tool, now],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch query: for each skill in a scenario, return which tools are enabled.
+    pub fn get_enabled_tools_for_scenario_skills_batch(
+        &self,
+        scenario_id: &str,
+        skill_ids: &[String],
+    ) -> Result<HashMap<String, Vec<String>>> {
+        if skill_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (2..=skill_ids.len() + 1)
+            .map(|i| format!("?{i}"))
+            .collect();
+        let sql = format!(
+            "SELECT skill_id, tool FROM scenario_skill_tools \
+             WHERE scenario_id = ?1 AND enabled = 1 AND skill_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut all_params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(1 + skill_ids.len());
+        all_params.push(&scenario_id as &dyn rusqlite::ToSql);
+        for sid in skill_ids {
+            all_params.push(sid as &dyn rusqlite::ToSql);
+        }
+        let rows = stmt.query_map(all_params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        for row in rows.filter_map(|r| r.ok()) {
+            map.entry(row.0).or_default().push(row.1);
+        }
+        Ok(map)
     }
 
     // ── Skill Tags ──
