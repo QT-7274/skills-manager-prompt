@@ -173,6 +173,21 @@
       "noTags": "無標籤",
       "tagAdded": "標籤已新增",
       "tagsUpdated": "標籤已更新"
+    },
+    "promptEditor": {
+      "button": "Prompt 編輯",
+      "title": "Prompt 編輯器",
+      "placeholder": "在此輸入 Prompt 文字，點擊左側 Skill 的箭頭按鈕插入到游標位置...",
+      "dragHint": "點擊箭頭按鈕插入 Skill 到編輯區",
+      "used": "已插入",
+      "save": "儲存範本",
+      "saved": "Prompt 範本已儲存",
+      "copy": "複製 Prompt",
+      "copied": "已複製到剪貼簿",
+      "exit": "退出編輯",
+      "preview": "預覽",
+      "emptySkills": "目前場景沒有已啟用的 Skills",
+      "dropZone": "將 Skill 拖曳到此處"
     }
   },
   "install": {

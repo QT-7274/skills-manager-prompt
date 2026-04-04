@@ -481,6 +481,8 @@ pub fn run() {
             commands::projects::reorder_projects,
             commands::scenarios::get_scenario_skill_order,
             commands::scenarios::reorder_scenario_skills,
+            commands::scenarios::save_scenario_prompt_template,
+            commands::scenarios::get_scenario_prompt_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -496,6 +498,7 @@ fn initialize_startup_scenario(store: &Arc<core::skill_store::SkillStore>) -> Re
             description: Some("Default startup scenario".to_string()),
             icon: None,
             sort_order: 0,
+            prompt_template: None,
             created_at: now,
             updated_at: now,
         };
