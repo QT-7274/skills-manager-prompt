@@ -3,7 +3,7 @@ import { Copy, Save, X, FileText, Plus, Pencil, Trash2, ChefHat } from "lucide-r
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import * as api from "../lib/tauri";
-import type { Recipe, ManagedSkill } from "../lib/tauri";
+import type { Recipe } from "../lib/tauri";
 
 export interface ScenarioPromptEditorHandle {
   insertSkillAtCursor: (name: string) => void;
@@ -11,7 +11,6 @@ export interface ScenarioPromptEditorHandle {
 
 interface ScenarioPromptEditorProps {
   scenarioId: string;
-  scenarioSkills?: ManagedSkill[];
   onExit: () => void;
   onTemplateChange?: (template: string) => void;
 }
@@ -42,7 +41,7 @@ export function extractUsedSkillNames(text: string): Set<string> {
 export const ScenarioPromptEditor = forwardRef<
   ScenarioPromptEditorHandle,
   ScenarioPromptEditorProps
->(function ScenarioPromptEditor({ scenarioId, scenarioSkills = [], onExit, onTemplateChange }, ref) {
+>(function ScenarioPromptEditor({ scenarioId, onExit, onTemplateChange }, ref) {
   const { t } = useTranslation();
   const [template, setTemplate] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -51,7 +50,6 @@ export const ScenarioPromptEditor = forwardRef<
   // Recipe state
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
-  const [recipeSkillIds, setRecipeSkillIds] = useState<Set<string>>(new Set());
   const [newRecipeName, setNewRecipeName] = useState("");
   const [showNewRecipeInput, setShowNewRecipeInput] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
@@ -78,21 +76,10 @@ export const ScenarioPromptEditor = forwardRef<
     }
   }, [scenarioId]);
 
-  // Load recipe skills
-  const loadRecipeSkills = useCallback(async (recipeId: string) => {
-    try {
-      const skills = await api.getRecipeSkills(recipeId);
-      setRecipeSkillIds(new Set(skills.map((s) => s.id)));
-    } catch {
-      setRecipeSkillIds(new Set());
-    }
-  }, []);
-
   // Init: load recipes + scenario template
   useEffect(() => {
     setLoaded(false);
     setSelectedRecipeId(null);
-    setRecipeSkillIds(new Set());
     Promise.all([loadRecipes(), loadScenarioTemplate()]).then(([, scenarioTpl]) => {
       setTemplate(scenarioTpl);
       onTemplateChange?.(scenarioTpl);
@@ -100,7 +87,7 @@ export const ScenarioPromptEditor = forwardRef<
     });
   }, [scenarioId]);
 
-  // When selected recipe changes, load its template and skills
+  // When selected recipe changes, load its template
   useEffect(() => {
     if (!selectedRecipeId) return;
     const recipe = recipes.find((r) => r.id === selectedRecipeId);
@@ -108,7 +95,6 @@ export const ScenarioPromptEditor = forwardRef<
       const tpl = recipe.prompt_template ?? "";
       setTemplate(tpl);
       onTemplateChange?.(tpl);
-      loadRecipeSkills(selectedRecipeId);
     }
   }, [selectedRecipeId]);
 
@@ -185,7 +171,6 @@ export const ScenarioPromptEditor = forwardRef<
   };
 
   const handleDeleteRecipe = async (recipe: Recipe) => {
-    if (!confirm(t("mySkills.recipes.deleteConfirm", { name: recipe.name }))) return;
     try {
       await api.deleteRecipe(recipe.id);
       toast.success(t("mySkills.recipes.deleted"));
@@ -194,7 +179,6 @@ export const ScenarioPromptEditor = forwardRef<
         const scenarioTpl = await loadScenarioTemplate();
         setTemplate(scenarioTpl);
         onTemplateChange?.(scenarioTpl);
-        setRecipeSkillIds(new Set());
       }
       await loadRecipes();
     } catch {
@@ -218,25 +202,8 @@ export const ScenarioPromptEditor = forwardRef<
     }
   };
 
-  const handleToggleRecipeSkill = async (skillId: string) => {
-    if (!selectedRecipeId) return;
-    const next = new Set(recipeSkillIds);
-    if (next.has(skillId)) {
-      next.delete(skillId);
-    } else {
-      next.add(skillId);
-    }
-    setRecipeSkillIds(next);
-    try {
-      await api.setRecipeSkills(selectedRecipeId, Array.from(next));
-    } catch {
-      toast.error(t("common.error"));
-    }
-  };
-
   const handleSelectScenarioPrompt = async () => {
     setSelectedRecipeId(null);
-    setRecipeSkillIds(new Set());
     const scenarioTpl = await loadScenarioTemplate();
     setTemplate(scenarioTpl);
     onTemplateChange?.(scenarioTpl);
@@ -394,30 +361,6 @@ export const ScenarioPromptEditor = forwardRef<
           )}
         </div>
       </div>
-
-      {/* Recipe skill subset (only when a recipe is selected) */}
-      {selectedRecipeId && scenarioSkills.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted">
-            {t("mySkills.recipes.skillSubset")}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {scenarioSkills.map((skill) => (
-              <button
-                key={skill.id}
-                onClick={() => handleToggleRecipeSkill(skill.id)}
-                className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  recipeSkillIds.has(skill.id)
-                    ? "border-accent/50 bg-accent/10 text-accent"
-                    : "border-border-subtle text-faint hover:text-muted"
-                }`}
-              >
-                {recipeSkillIds.has(skill.id) ? "\u2611 " : "\u2610 "}{skill.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Textarea */}
       <div className="flex flex-1 flex-col rounded-lg border border-border-subtle bg-bg-secondary">
