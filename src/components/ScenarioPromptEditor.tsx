@@ -1,8 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Copy, Save, X, FileText } from "lucide-react";
+import { Copy, Save, X, FileText, Plus, Pencil, Trash2, ChefHat } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import * as api from "../lib/tauri";
+import type { Recipe } from "../lib/tauri";
 
 export interface ScenarioPromptEditorHandle {
   insertSkillAtCursor: (name: string) => void;
@@ -46,19 +47,56 @@ export const ScenarioPromptEditor = forwardRef<
   const [loaded, setLoaded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load saved template on mount / scenario change
+  // Recipe state
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+  const [newRecipeName, setNewRecipeName] = useState("");
+  const [showNewRecipeInput, setShowNewRecipeInput] = useState(false);
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  // Load recipes for this scenario
+  const loadRecipes = useCallback(async () => {
+    try {
+      const list = await api.getRecipesForScenario(scenarioId);
+      setRecipes(list);
+      return list;
+    } catch {
+      return [];
+    }
+  }, [scenarioId]);
+
+  // Load scenario prompt template (fallback when no recipe selected)
+  const loadScenarioTemplate = useCallback(async () => {
+    try {
+      const saved = await api.getScenarioPromptTemplate(scenarioId);
+      return saved ?? "";
+    } catch {
+      return "";
+    }
+  }, [scenarioId]);
+
+  // Init: load recipes + scenario template
   useEffect(() => {
     setLoaded(false);
-    api
-      .getScenarioPromptTemplate(scenarioId)
-      .then((saved) => {
-        const val = saved ?? "";
-        setTemplate(val);
-        onTemplateChange?.(val);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
+    setSelectedRecipeId(null);
+    Promise.all([loadRecipes(), loadScenarioTemplate()]).then(([, scenarioTpl]) => {
+      setTemplate(scenarioTpl);
+      onTemplateChange?.(scenarioTpl);
+      setLoaded(true);
+    });
   }, [scenarioId]);
+
+  // When selected recipe changes, load its template
+  useEffect(() => {
+    if (!selectedRecipeId) return;
+    const recipe = recipes.find((r) => r.id === selectedRecipeId);
+    if (recipe) {
+      const tpl = recipe.prompt_template ?? "";
+      setTemplate(tpl);
+      onTemplateChange?.(tpl);
+    }
+  }, [selectedRecipeId]);
 
   /** Insert a skill tag at the current cursor position in the textarea. */
   const insertSkillAtCursor = useCallback(
@@ -89,7 +127,11 @@ export const ScenarioPromptEditor = forwardRef<
 
   const handleSave = async () => {
     try {
-      await api.saveScenarioPromptTemplate(scenarioId, template || null);
+      if (selectedRecipeId) {
+        await api.saveRecipePromptTemplate(selectedRecipeId, template || null);
+      } else {
+        await api.saveScenarioPromptTemplate(scenarioId, template || null);
+      }
       toast.success(t("mySkills.promptEditor.saved"));
     } catch {
       toast.error(t("common.error"));
@@ -110,6 +152,61 @@ export const ScenarioPromptEditor = forwardRef<
     const next = template.replace(makeSkillTag(skillName), "");
     setTemplate(next);
     onTemplateChange?.(next);
+  };
+
+  // ── Recipe CRUD ──
+
+  const handleCreateRecipe = async () => {
+    if (!newRecipeName.trim()) return;
+    try {
+      const recipe = await api.createRecipe(scenarioId, newRecipeName.trim());
+      toast.success(t("mySkills.recipes.created"));
+      setNewRecipeName("");
+      setShowNewRecipeInput(false);
+      await loadRecipes();
+      setSelectedRecipeId(recipe.id);
+    } catch {
+      toast.error(t("common.error"));
+    }
+  };
+
+  const handleDeleteRecipe = async (recipe: Recipe) => {
+    try {
+      await api.deleteRecipe(recipe.id);
+      toast.success(t("mySkills.recipes.deleted"));
+      if (selectedRecipeId === recipe.id) {
+        setSelectedRecipeId(null);
+        const scenarioTpl = await loadScenarioTemplate();
+        setTemplate(scenarioTpl);
+        onTemplateChange?.(scenarioTpl);
+      }
+      await loadRecipes();
+    } catch {
+      toast.error(t("common.error"));
+    }
+  };
+
+  const handleRenameRecipe = async (recipeId: string) => {
+    if (!editingName.trim()) {
+      setEditingRecipeId(null);
+      return;
+    }
+    try {
+      const recipe = recipes.find((r) => r.id === recipeId);
+      await api.updateRecipe(recipeId, editingName.trim(), recipe?.description, recipe?.icon);
+      toast.success(t("mySkills.recipes.updated"));
+      setEditingRecipeId(null);
+      await loadRecipes();
+    } catch {
+      toast.error(t("common.error"));
+    }
+  };
+
+  const handleSelectScenarioPrompt = async () => {
+    setSelectedRecipeId(null);
+    const scenarioTpl = await loadScenarioTemplate();
+    setTemplate(scenarioTpl);
+    onTemplateChange?.(scenarioTpl);
   };
 
   // Render the preview with inline skill badges
@@ -173,6 +270,95 @@ export const ScenarioPromptEditor = forwardRef<
             <X className="h-3 w-3 shrink-0" />
             {t("mySkills.promptEditor.exit")}
           </button>
+        </div>
+      </div>
+
+      {/* Recipe list */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+            <ChefHat className="h-3 w-3" />
+            {t("mySkills.recipes.title")}
+          </div>
+          <button
+            onClick={() => setShowNewRecipeInput(true)}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent-bg"
+          >
+            <Plus className="h-3 w-3" />
+            {t("mySkills.recipes.newRecipe")}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-1">
+          {/* Scenario default prompt button */}
+          <button
+            onClick={handleSelectScenarioPrompt}
+            className={`rounded-md border px-2 py-1 text-[12px] font-medium transition-colors ${
+              selectedRecipeId === null
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border-subtle text-muted hover:border-accent/50 hover:text-secondary"
+            }`}
+          >
+            {t("mySkills.recipes.scenarioPrompt")}
+          </button>
+
+          {/* Recipe buttons */}
+          {recipes.map((recipe) => (
+            <div key={recipe.id} className="group flex items-center gap-0.5">
+              {editingRecipeId === recipe.id ? (
+                <input
+                  autoFocus
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRenameRecipe(recipe.id);
+                    if (e.key === "Escape") setEditingRecipeId(null);
+                  }}
+                  onBlur={() => handleRenameRecipe(recipe.id)}
+                  className="rounded-md border border-accent bg-transparent px-2 py-1 text-[12px] font-medium text-primary outline-none"
+                />
+              ) : (
+                <button
+                  onClick={() => setSelectedRecipeId(recipe.id)}
+                  className={`rounded-md border px-2 py-1 text-[12px] font-medium transition-colors ${
+                    selectedRecipeId === recipe.id
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border-subtle text-muted hover:border-accent/50 hover:text-secondary"
+                  }`}
+                >
+                  {recipe.icon ? `${recipe.icon} ` : ""}{recipe.name}
+                </button>
+              )}
+              <button
+                onClick={() => { setEditingRecipeId(recipe.id); setEditingName(recipe.name); }}
+                className="rounded p-0.5 text-faint opacity-0 transition-all hover:text-secondary group-hover:opacity-100"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => handleDeleteRecipe(recipe)}
+                className="rounded p-0.5 text-faint opacity-0 transition-all hover:text-red-400 group-hover:opacity-100"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+
+          {/* New recipe inline input */}
+          {showNewRecipeInput && (
+            <input
+              autoFocus
+              value={newRecipeName}
+              onChange={(e) => setNewRecipeName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateRecipe();
+                if (e.key === "Escape") { setShowNewRecipeInput(false); setNewRecipeName(""); }
+              }}
+              onBlur={() => { if (!newRecipeName.trim()) { setShowNewRecipeInput(false); setNewRecipeName(""); } }}
+              placeholder={t("mySkills.recipes.namePlaceholder")}
+              className="rounded-md border border-accent bg-transparent px-2 py-1 text-[12px] font-medium text-primary outline-none placeholder:text-faint"
+            />
+          )}
         </div>
       </div>
 
