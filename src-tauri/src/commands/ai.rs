@@ -86,6 +86,7 @@ pub async fn invoke_codebuddy_agent(
             .map_err(|e| AppError::internal(format!("Failed to write to stdin: {e}")))?;
     }
 
+    // tokio::Child is killed on drop, so timeout automatically cleans up the process
     let output = timeout(Duration::from_secs(60), child.wait_with_output())
         .await
         .map_err(|_| AppError::internal("AI request timed out (60s)"))?
