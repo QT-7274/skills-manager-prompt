@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod browse;
 pub mod git_backup;
 pub mod projects;

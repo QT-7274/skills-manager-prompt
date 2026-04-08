@@ -493,6 +493,8 @@ pub fn run() {
             commands::recipes::set_recipe_skills,
             commands::recipes::get_recipe_skills,
             commands::recipes::reorder_recipes,
+            // AI
+            commands::ai::invoke_codebuddy_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
