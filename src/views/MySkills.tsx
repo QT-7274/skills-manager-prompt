@@ -374,40 +374,42 @@ export function MySkills() {
     }
   }, [gitStatus?.is_repo]);
 
-  const refreshGitRemoteConfig = useCallback(async () => {
-    const saved = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
-    if (saved) {
-      setGitRemoteConfig(saved);
-      return;
-    }
-    const status = await api.gitBackupStatus().catch(() => null);
-    const detected = status?.remote_url?.trim() || "";
-    if (detected) {
-      setGitRemoteConfig(detected);
-      api.setSettings("git_backup_remote_url", detected).catch(() => {});
-    }
-  }, []);
+  const refreshGitRemoteConfig = useCallback(
+    async (existingStatus?: GitBackupStatus | null) => {
+      const saved = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
+      if (saved) {
+        setGitRemoteConfig(saved);
+        return;
+      }
+      const detected = existingStatus?.remote_url?.trim() || "";
+      if (detected) {
+        setGitRemoteConfig(detected);
+        api.setSettings("git_backup_remote_url", detected).catch(() => {});
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     (async () => {
       const [, status] = await Promise.all([
-        refreshGitRemoteConfig(),
+        api.getSettings("git_backup_remote_url").catch(() => null),
         api.gitBackupStatus().catch(() => null),
       ]);
       setGitStatus(status);
+      await refreshGitRemoteConfig(status);
     })();
   }, [refreshGitRemoteConfig]);
 
   useEffect(() => {
-    const handleWindowFocus = () => {
-      refreshGitStatus();
-      refreshGitRemoteConfig();
+    const refreshAll = async () => {
+      const status = await api.gitBackupStatus().catch(() => null);
+      setGitStatus(status);
+      await refreshGitRemoteConfig(status);
     };
+    const handleWindowFocus = () => { refreshAll(); };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        refreshGitStatus();
-        refreshGitRemoteConfig();
-      }
+      if (document.visibilityState === "visible") refreshAll();
     };
 
     window.addEventListener("focus", handleWindowFocus);
@@ -416,7 +418,7 @@ export function MySkills() {
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refreshGitStatus, refreshGitRemoteConfig]);
+  }, [refreshGitRemoteConfig]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
