@@ -190,10 +190,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 action: {
                   label: i18n.t("mySkills.viewUpdates"),
                   onClick: () => {
-                    setDetailSkillId(updatable[0].id);
-                    // Navigate to my-skills page — AppProvider is outside Router,
-                    // so use pushState + popstate event for SPA navigation that
-                    // preserves React state (window.location.href would discard it).
+                    setDetailSkillId(null);
+                    // Navigate to My Skills without opening a specific detail panel.
+                    // AppProvider is outside Router, so use pushState + popstate
+                    // to preserve SPA state.
                     if (!window.location.pathname.endsWith("/my-skills")) {
                       window.history.pushState(null, "", "/my-skills");
                       window.dispatchEvent(new PopStateEvent("popstate"));
