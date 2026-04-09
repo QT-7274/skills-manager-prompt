@@ -155,6 +155,10 @@
       "noImportSkillsWithMatches": "未找到有線上匹配的匯入 Skill",
       "autoSelectBest": "自動選擇最佳",
       "selectFromMatches": "選擇一個匹配的版本",
+      "relink": "重新關聯",
+      "relinked": "已重新關聯原路徑",
+      "detachSource": "轉為本機副本",
+      "detachedSource": "已取消原路徑追蹤",
       "alreadyUpToDate": "Skill 內容未變化（版本已同步）"
     },
     "gitConfigEntry": "同步設定",

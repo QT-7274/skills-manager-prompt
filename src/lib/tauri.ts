@@ -297,6 +297,12 @@ export interface BatchConvertResult {
 export const convertBatchImportToOnline = (items: BatchConversionItem[]) =>
   invoke<BatchConvertResult>("convert_batch_import_to_online", { items });
 
+export const relinkLocalSkillSource = (skillId: string, sourcePath: string) =>
+  invoke<ManagedSkill>("relink_local_skill_source", { skillId, sourcePath });
+
+export const detachLocalSkillSource = (skillId: string) =>
+  invoke<ManagedSkill>("detach_local_skill_source", { skillId });
+
 export interface BatchImportResult {
   imported: number;
   skipped: number;

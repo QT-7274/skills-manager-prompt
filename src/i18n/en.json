@@ -174,6 +174,10 @@
       "noImportSkillsWithMatches": "No imported skills with online skills with online matches found",
       "autoSelectBest": "Auto-select Best",
       "selectFromMatches": "Select a matching version below",
+      "relink": "Relink",
+      "relinked": "Source path relinked",
+      "detachSource": "Keep local copy",
+      "detachedSource": "Source tracking removed",
       "alreadyUpToDate": "Skill content unchanged (version synced)"
     },
     "gitConfigEntry": "Sync Config",
