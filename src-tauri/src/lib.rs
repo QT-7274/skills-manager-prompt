@@ -374,6 +374,8 @@ pub fn run() {
                 ensure_tray_icon(app.handle())?;
             }
 
+            core::file_watcher::start_file_watcher(app.handle().clone(), store_for_setup.clone());
+
             // Intercept window close — let frontend decide (close vs hide to tray)
             // When QUITTING is set, allow the close to proceed so the process fully exits.
             let win = app.get_webview_window("main").unwrap();

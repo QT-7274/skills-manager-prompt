@@ -2,6 +2,7 @@ pub mod central_repo;
 pub mod content_hash;
 pub mod crypto;
 pub mod error;
+pub mod file_watcher;
 pub mod git_backup;
 pub mod git_fetcher;
 pub mod install_cancel;

@@ -163,6 +163,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshManagedSkills]);
 
+  // Listen for file changes from file watcher (upstream feature)
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const unlistenPromise = listen("app-files-changed", () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+      refreshTimer = setTimeout(() => {
+        refreshAppData().catch((error) => {
+          console.error("Failed to refresh after filesystem change:", error);
+        });
+      }, 500);
+    });
+
+    return () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+      unlistenPromise
+        .then((unlisten) => unlisten())
+        .catch((error) => {
+          console.error("Failed to unlisten app-files-changed:", error);
+        });
+    };
+  }, [refreshAppData]);
+
   // Auto-check skill updates on startup (non-blocking, silent)
   useEffect(() => {
     if (loading || managedSkills.length === 0) return;

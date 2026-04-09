@@ -46,6 +46,7 @@ rayon = "1"
 aes-gcm = "0.10"
 rand = "0.8"
 image = { version = "0.25", default-features = false, features = ["png"] }
+notify = "6.1.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
