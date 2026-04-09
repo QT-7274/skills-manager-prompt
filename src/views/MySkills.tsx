@@ -374,33 +374,42 @@ export function MySkills() {
     }
   }, [gitStatus?.is_repo]);
 
-  useEffect(() => {
-    (async () => {
-      const savedRemote = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
-      const status = await api.gitBackupStatus().catch(() => null);
-      setGitStatus(status);
-
-      if (savedRemote) {
-        setGitRemoteConfig(savedRemote);
+  const refreshGitRemoteConfig = useCallback(
+    async (existingStatus?: GitBackupStatus | null) => {
+      const saved = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
+      if (saved) {
+        setGitRemoteConfig(saved);
         return;
       }
-
-      const detectedRemote = status?.remote_url?.trim() || "";
-      if (detectedRemote) {
-        setGitRemoteConfig(detectedRemote);
-        api.setSettings("git_backup_remote_url", detectedRemote).catch(() => {});
+      const detected = existingStatus?.remote_url?.trim() || "";
+      if (detected) {
+        setGitRemoteConfig(detected);
+        api.setSettings("git_backup_remote_url", detected).catch(() => {});
       }
-    })();
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    const handleWindowFocus = () => {
-      refreshGitStatus();
+    (async () => {
+      const [, status] = await Promise.all([
+        api.getSettings("git_backup_remote_url").catch(() => null),
+        api.gitBackupStatus().catch(() => null),
+      ]);
+      setGitStatus(status);
+      await refreshGitRemoteConfig(status);
+    })();
+  }, [refreshGitRemoteConfig]);
+
+  useEffect(() => {
+    const refreshAll = async () => {
+      const status = await api.gitBackupStatus().catch(() => null);
+      setGitStatus(status);
+      await refreshGitRemoteConfig(status);
     };
+    const handleWindowFocus = () => { refreshAll(); };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        refreshGitStatus();
-      }
+      if (document.visibilityState === "visible") refreshAll();
     };
 
     window.addEventListener("focus", handleWindowFocus);
@@ -409,7 +418,7 @@ export function MySkills() {
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refreshGitStatus]);
+  }, [refreshGitRemoteConfig]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -982,7 +991,12 @@ export function MySkills() {
         toneClassName: "text-red-500",
       };
     }
-    if (gitStatus.has_changes || gitStatus.ahead > 0 || gitStatus.behind > 0) {
+    if (
+      (!gitStatus.remote_url && gitRemoteConfig) ||
+      gitStatus.has_changes ||
+      gitStatus.ahead > 0 ||
+      gitStatus.behind > 0
+    ) {
       return {
         label: t("mySkills.gitRepoSync"),
         disabled: false,
