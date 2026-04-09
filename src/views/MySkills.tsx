@@ -332,6 +332,7 @@ export function MySkills() {
       message.includes("Could not resolve host")
       || message.includes("Failed to connect")
       || message.includes("Connection timed out")
+      || /connection\s+refused/i.test(message)
     ) {
       return t("settings.gitErrorNetwork");
     }

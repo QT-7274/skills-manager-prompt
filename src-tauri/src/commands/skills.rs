@@ -331,7 +331,7 @@ pub async fn install_git(
             Some(&cancel),
             proxy_url.as_deref(),
         )
-        .map_err(AppError::git_or_cancelled)?;
+        .map_err(AppError::classify_git_error)?;
 
         emit_progress("installing");
         let install_result =
@@ -399,7 +399,7 @@ pub async fn install_from_skillssh(
         let repo_url = format!("https://github.com/{}.git", source);
         let temp_dir =
             git_fetcher::clone_repo_ref(&repo_url, None, Some(&cancel), proxy_url.as_deref())
-                .map_err(AppError::git_or_cancelled)?;
+                .map_err(AppError::classify_git_error)?;
 
         emit_progress("installing");
         let install_result =
@@ -475,7 +475,7 @@ pub async fn preview_git_install(
             Some(&cancel),
             proxy_url.as_deref(),
         )
-        .map_err(AppError::git_or_cancelled)?;
+        .map_err(AppError::classify_git_error)?;
 
         let build_preview = || -> Result<GitPreviewResult, AppError> {
             let skill_dir = resolve_skill_dir(&temp_dir, parsed.subpath.as_deref(), None)?;
@@ -699,7 +699,7 @@ pub async fn update_skill(
             Some(&cancel),
             proxy_url.as_deref(),
         )
-        .map_err(AppError::git_or_cancelled)?;
+        .map_err(AppError::classify_git_error)?;
         let update_result = (|| -> Result<(), AppError> {
             git_fetcher::checkout_revision(&temp_dir, &remote_revision).map_err(AppError::git)?;
             let skill_dir = resolve_skill_dir(
