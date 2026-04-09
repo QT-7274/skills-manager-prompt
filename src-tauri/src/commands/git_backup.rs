@@ -32,7 +32,7 @@ pub async fn git_backup_set_remote(
     git_fetcher::validate_git_url(&url).map_err(AppError::git)?;
     let skills_dir = central_repo::skills_dir();
     tokio::task::spawn_blocking(move || {
-        git_backup::set_remote(&skills_dir, &url).map_err(AppError::git)
+        git_backup::set_remote(&skills_dir, &url).map_err(AppError::classify_git_error)
     })
     .await?
 }
@@ -54,7 +54,7 @@ pub async fn git_backup_commit(
 pub async fn git_backup_push(store: State<'_, Arc<SkillStore>>) -> Result<(), AppError> {
     let _ = store;
     let skills_dir = central_repo::skills_dir();
-    tokio::task::spawn_blocking(move || git_backup::push(&skills_dir).map_err(AppError::git))
+    tokio::task::spawn_blocking(move || git_backup::push(&skills_dir).map_err(AppError::classify_git_error))
         .await?
 }
 
@@ -63,7 +63,7 @@ pub async fn git_backup_pull(store: State<'_, Arc<SkillStore>>) -> Result<(), Ap
     let store = store.inner().clone();
     let skills_dir = central_repo::skills_dir();
     tokio::task::spawn_blocking(move || {
-        git_backup::pull(&skills_dir).map_err(AppError::git)?;
+        git_backup::pull(&skills_dir).map_err(AppError::classify_git_error)?;
         reconcile_skills_index(&store).map_err(AppError::db)
     })
     .await?
@@ -78,7 +78,7 @@ pub async fn git_backup_clone(
     let store = store.inner().clone();
     let skills_dir = central_repo::skills_dir();
     tokio::task::spawn_blocking(move || {
-        git_backup::clone_into(&skills_dir, &url).map_err(AppError::git)?;
+        git_backup::clone_into(&skills_dir, &url).map_err(AppError::classify_git_error)?;
         reconcile_skills_index(&store).map_err(AppError::db)
     })
     .await?

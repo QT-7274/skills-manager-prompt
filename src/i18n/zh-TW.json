@@ -343,13 +343,11 @@
     "gitNeedRemoteSetup": "請先在設定頁設定遠端倉庫位址",
     "gitNeedPullFirst": "遠端有更新，請先拉取以避免衝突。",
     "gitPendingSync": "本機變更待同步",
-    "gitShowAdvanced": "顯示進階設定",
-    "gitHideAdvanced": "隱藏進階設定",
     "gitErrorAuth": "驗證失敗，請檢查 SSH Key 或存取權杖。",
     "gitErrorNetwork": "網路連線失敗，請檢查網路和遠端倉庫位址。",
     "gitErrorConflict": "偵測到同步衝突，請先拉取並解決衝突。",
     "gitErrorNotRepo": "未偵測到 Git 倉庫，請先開始備份。",
-    "gitErrorGeneric": "Git 操作失敗，請檢查進階設定後重試。"
+    "gitErrorGeneric": "Git 操作失敗，請檢查設定中的遠端倉庫位址後重試。"
   },
   "common": {
     "loading": "載入中...",
