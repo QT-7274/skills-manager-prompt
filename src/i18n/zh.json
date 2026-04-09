@@ -141,7 +141,8 @@
       "update": "更新",
       "updated": "Skill 已更新",
       "reimport": "重新导入",
-      "reimported": "Skill 已重新导入"
+      "reimported": "Skill 已重新导入",
+      "alreadyUpToDate": "Skill 内容未变化（版本已同步）"
     },
     "gitConfigEntry": "同步配置",
     "filters": {

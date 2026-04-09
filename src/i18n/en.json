@@ -141,7 +141,8 @@
       "update": "Update",
       "updated": "Skill updated",
       "reimport": "Reimport",
-      "reimported": "Skill reimported"
+      "reimported": "Skill reimported",
+      "alreadyUpToDate": "Skill content unchanged (version synced)"
     },
     "gitConfigEntry": "Sync Config",
     "filters": {
