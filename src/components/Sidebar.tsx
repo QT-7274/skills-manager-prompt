@@ -274,8 +274,10 @@ export function Sidebar() {
 
         {/* Scenarios */}
         <div className="px-2.5 flex-1 overflow-y-auto scrollbar-hide min-h-0">
-          <div className="text-[13px] font-semibold text-muted mb-1.5 px-2.5 tracking-[0.1em] uppercase">
-            {t("sidebar.scenarios")}
+          <div className="mb-1.5 px-2.5">
+            <span className="block truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
+              {t("sidebar.scenarios")}
+            </span>
           </div>
           <DragDropContext onDragEnd={handleDragEnd}>
             <Droppable droppableId="scenarios">
@@ -303,7 +305,7 @@ export function Sidebar() {
                             <button
                               onClick={() => handleSwitchScenario(scenario.id)}
                               className={cn(
-                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm outline-none",
+                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-[15px] leading-5 outline-none",
                                 isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
                               )}
                             >
@@ -318,18 +320,20 @@ export function Sidebar() {
                                 <ScenarioIcon className="h-3 w-3" />
                               </span>
                               <span className="flex-1 truncate">{scenario.name}</span>
-                              {scenario.skill_count > 0 && (
-                                <span
-                                  className={cn(
-                                    "shrink-0 rounded-full px-1.5 text-[13px] font-medium leading-[18px] group-hover:hidden",
-                                    isActive
-                                      ? "bg-accent-bg text-accent-light"
-                                      : "bg-surface-hover text-muted"
-                                  )}
-                                >
-                                  {scenario.skill_count}
-                                </span>
-                              )}
+                              <span className="ml-auto flex h-[18px] w-[32px] shrink-0 items-center justify-end group-hover:hidden">
+                                {scenario.skill_count > 0 && (
+                                  <span
+                                    className={cn(
+                                      "min-w-[18px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
+                                      isActive
+                                        ? "bg-accent-bg text-accent-light"
+                                        : "bg-surface-hover text-muted"
+                                    )}
+                                  >
+                                    {scenario.skill_count}
+                                  </span>
+                                )}
+                              </span>
                             </button>
 
                             <div className={cn(
@@ -368,7 +372,7 @@ export function Sidebar() {
             </Droppable>
           </DragDropContext>
 
-          <div className="flex items-center gap-0.5 mt-0.5">
+          <div className="flex items-center gap-0.5 mt-1">
             <button
               onClick={() => setShowCreate(true)}
               className="flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors flex-1 outline-none"
@@ -389,13 +393,16 @@ export function Sidebar() {
               )}
             </button>
           </div>
+>>>>>>> 72aa19f (style: refine sidebar typography and alignment)
 
           {/* Divider */}
           <div className="mx-0.5 mt-3.5 mb-2.5 border-t border-border-subtle" />
 
           {/* Projects */}
-          <div className="text-[13px] font-semibold text-muted mb-1.5 px-2.5 tracking-[0.1em] uppercase">
-            {t("sidebar.projects")}
+          <div className="mb-1.5 px-2.5">
+            <span className="block truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
+              {t("sidebar.projects")}
+            </span>
           </div>
           <DragDropContext onDragEnd={handleProjectDragEnd}>
             <Droppable droppableId="projects">
@@ -422,7 +429,7 @@ export function Sidebar() {
                             <button
                               onClick={() => navigate(`/project/${project.id}`)}
                               className={cn(
-                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm outline-none",
+                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-[15px] leading-5 outline-none",
                                 isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
                               )}
                             >
@@ -437,21 +444,26 @@ export function Sidebar() {
                                 <FolderOpen className="h-3 w-3" />
                               </span>
                               <span className="flex-1 truncate">{project.name}</span>
-                              {healthIndicator && (
-                                <span className={cn("shrink-0 h-1.5 w-1.5 rounded-full group-hover:hidden", healthIndicator.color)} title={healthIndicator.title} />
-                              )}
-                              {project.skill_count > 0 && (
-                                <span
-                                  className={cn(
-                                    "shrink-0 rounded-full px-1.5 text-[13px] font-medium leading-[18px] group-hover:hidden",
-                                    isActive
-                                      ? "bg-accent-bg text-accent-light"
-                                      : "bg-surface-hover text-muted"
-                                  )}
-                                >
-                                  {project.skill_count}
-                                </span>
-                              )}
+                              <span className="ml-auto flex h-[18px] w-[52px] shrink-0 items-center justify-end gap-2 group-hover:hidden">
+                                {healthIndicator && (
+                                  <span
+                                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full", healthIndicator.color)}
+                                    title={healthIndicator.title}
+                                  />
+                                )}
+                                {project.skill_count > 0 && (
+                                  <span
+                                    className={cn(
+                                      "min-w-[24px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
+                                      isActive
+                                        ? "bg-accent-bg text-accent-light"
+                                        : "bg-surface-hover text-muted"
+                                    )}
+                                  >
+                                    {project.skill_count}
+                                  </span>
+                                )}
+                              </span>
                             </button>
 
                             <div className={cn(
@@ -489,7 +501,7 @@ export function Sidebar() {
 
           <button
             onClick={() => setShowAddProject(true)}
-            className="flex items-center gap-2 px-2.5 py-[7px] mt-0.5 rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors w-full outline-none"
+            className="flex items-center gap-2 px-2.5 py-[7px] mt-1 rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors w-full outline-none"
           >
             <Plus className="w-3.5 h-3.5" />
             {t("sidebar.addProject")}
