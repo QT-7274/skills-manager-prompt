@@ -31,7 +31,7 @@
       },
       "projects": {
         "title": "Use Project Workspaces for repo-specific skills",
-        "description": "Link a project to inspect project-local skill folders, compare them with the central library, and import or export changes for the agents you care about."
+        "description": "Link a project to inspect project-local skill folders (including nested directories), compare them with the central library, and import or export changes for the agents you care about. You can also link any directory as a standalone skills workspace for paths outside the default agent locations."
       },
       "backup": {
         "title": "Use Git backup when you need history or multi-machine sync",
@@ -446,7 +446,7 @@
     "language": "Language",
     "help": "Help",
     "about": "About",
-    "version": "Skills Manager 1.13.0",
+    "version": "Skills Manager 1.13.1",
     "tagline": "Cross-platform. Minimal, efficient, seamless multi-scenario switching.",
     "checkUpdate": "Check for Updates",
     "checking": "Checking…",

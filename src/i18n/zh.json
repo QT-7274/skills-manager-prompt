@@ -31,7 +31,7 @@
       },
       "projects": {
         "title": "项目工作区适合管理仓库内的本地 Skills",
-        "description": "关联项目后，可以查看项目内各 Agent 的本地 Skills 目录，对照中央仓库，并按需双向导入或导出。"
+        "description": "关联项目后，可以查看项目内各 Agent 的本地 Skills 目录（支持嵌套目录），对照中央仓库，并按需双向导入或导出。也可以将任意目录指定为独立 Skills 工作区，管理不在默认 Agent 路径下的 Skills。"
       },
       "backup": {
         "title": "需要历史版本或多机同步时，用 Git 备份",
@@ -446,7 +446,7 @@
     "language": "语言",
     "help": "帮助",
     "about": "关于",
-    "version": "Skills Manager 1.13.0",
+    "version": "Skills Manager 1.13.1",
     "tagline": "跨平台。极简、高效、无感多场景切换。",
     "checkUpdate": "检查更新",
     "checking": "检查中…",

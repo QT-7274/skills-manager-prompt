@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] - 2026-04-10
+
+### Fixed
+- Prevented symlink cycles from causing infinite loops when scanning project skills or computing timestamps
+- Validated symlink targets in skill document reads to stay within allowed project roots
+- Fixed import matching to stay consistent with the sync-status displayed in the UI
+
 ## [1.13.0] - 2026-04-10
 
 ### Added
