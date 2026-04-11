@@ -315,22 +315,19 @@ pub fn set_tray_icon_enabled(app: &tauri::AppHandle, enabled: bool) -> Result<()
 }
 
 /// Quit the application cleanly: destroy the main window, then exit.
-/// In dev mode, also kill sibling processes in the same process group
-/// so that `tauri dev`'s beforeDevCommand (vite) gets cleaned up.
+///
+/// Do NOT signal our process group here (e.g. `kill(-pgid, SIGTERM)`).
+/// On Linux the app inherits the launcher's pgid — that may be the user's
+/// desktop session (issue #47, tearing down GNOME) or the developer's shell
+/// (terminating the parent terminal and its sibling jobs). Either is
+/// catastrophic and not worth the convenience of auto-cleaning a stray
+/// `tauri dev` vite process.
 pub fn quit_app(app: &tauri::AppHandle) {
     QUITTING.store(true, Ordering::SeqCst);
     if let Some(w) = app.get_webview_window("main") {
         if let Err(err) = w.destroy() {
             log::error!("Failed to destroy main window while quitting: {err}");
         }
-    }
-    // In dev mode, kill sibling processes (vite dev server) by signaling the process group.
-    // Uses libc directly to avoid platform-specific `kill` command syntax differences.
-    #[cfg(unix)]
-    unsafe {
-        // getpgrp() returns our process group ID; kill(-pgid, SIGTERM) sends to all in the group.
-        let pgid = libc::getpgrp();
-        libc::kill(-pgid, libc::SIGTERM);
     }
     app.exit(0);
 }
