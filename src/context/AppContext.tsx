@@ -103,22 +103,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const handleSwitchScenario = useCallback(
     async (id: string) => {
       try {
-        const t0 = performance.now();
         await api.switchScenario(id);
-        console.log(`[perf] switchScenario IPC: ${(performance.now() - t0).toFixed(0)}ms`);
-        
-        const t1 = performance.now();
-        await refreshScenarios();
-        console.log(`[perf] refreshScenarios: ${(performance.now() - t1).toFixed(0)}ms`);
-        console.log(`[perf] TOTAL switch (skills refresh deferred to scenario-sync-complete): ${(performance.now() - t0).toFixed(0)}ms`);
-        
+        await Promise.all([refreshScenarios(), refreshManagedSkills()]);
         setAppError(null);
       } catch (e) {
         console.error("Failed to switch scenario:", e);
         setTranslatedError("common.scenarios");
       }
     },
-    [refreshScenarios, setTranslatedError]
+    [refreshManagedSkills, refreshScenarios, setTranslatedError]
   );
 
   useEffect(() => {
@@ -148,22 +141,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshManagedSkills, refreshScenarios]);
 
-  // Refresh skills after background file sync completes (targets updated)
-  useEffect(() => {
-    const unlistenPromise = listen("scenario-sync-complete", async () => {
-      await refreshManagedSkills();
-    });
-
-    return () => {
-      unlistenPromise
-        .then((unlisten) => unlisten())
-        .catch((error) => {
-          console.error("Failed to unlisten scenario-sync-complete:", error);
-        });
-    };
-  }, [refreshManagedSkills]);
-
-  // Listen for file changes from file watcher (upstream feature)
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 

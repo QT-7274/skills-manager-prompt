@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Circle,
   Globe,
-  Layers,
   Link as LinkIcon,
   Copy,
   Settings2,
@@ -79,11 +78,9 @@ export function Settings() {
   const [togglingTools, setTogglingTools] = useState<Set<string>>(new Set());
   const { theme, setTheme } = useThemeContext();
   const [syncMode, setSyncMode] = useState("symlink");
-  const [syncScope, setSyncScope] = useState("scenario");
   const [defaultScenario, setDefaultScenario] = useState("");
   const [closeAction, setCloseAction] = useState("");
   const [showTrayIcon, setShowTrayIcon] = useState(true);
-  const [developerMode, setDeveloperMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [openingRepo, setOpeningRepo] = useState(false);
   const [openingGithub, setOpeningGithub] = useState(false);
@@ -98,9 +95,6 @@ export function Settings() {
   const [textSize, setTextSize] = useState("default");
   const [skillsmpApiKey, setSkillsmpApiKey] = useState("");
   const [skillsmpSaving, setSkillsmpSaving] = useState(false);
-  const [codebuddyApiKey, setCodebuddyApiKey] = useState("");
-  const [codebuddyEnv, setCodebuddyEnv] = useState("");
-  const [codebuddySaving, setCodebuddySaving] = useState(false);
   // Agent path editing
   const [editingPathKey, setEditingPathKey] = useState<string | null>(null);
   const [editingPathValue, setEditingPathValue] = useState("");
@@ -108,6 +102,7 @@ export function Settings() {
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customPath, setCustomPath] = useState("");
+  const [customProjectPath, setCustomProjectPath] = useState("");
   const [addingCustom, setAddingCustom] = useState(false);
   const [showMoreAgents, setShowMoreAgents] = useState(false);
 
@@ -168,16 +163,18 @@ export function Settings() {
   const handleAddCustomAgent = async () => {
     const trimName = customName.trim();
     const trimPath = customPath.trim();
+    const trimProjectPath = customProjectPath.trim();
     if (!trimName || !trimPath) return;
     const trimKey = generateCustomAgentKey(trimName);
     setAddingCustom(true);
     try {
-      await api.addCustomTool(trimKey, trimName, trimPath);
+      await api.addCustomTool(trimKey, trimName, trimPath, trimProjectPath || undefined);
       await refreshTools();
       toast.success(t("settings.customAgentAdded"));
       setShowAddCustom(false);
       setCustomName("");
       setCustomPath("");
+      setCustomProjectPath("");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -199,7 +196,6 @@ export function Settings() {
 
   useEffect(() => {
     api.getSettings("sync_mode").then((v) => { if (v) setSyncMode(v); });
-    api.getSettings("skill_sync_scope").then((v) => { if (v) setSyncScope(v); });
     api.getSettings("default_scenario").then((v) => { if (v) setDefaultScenario(v); });
     api.getSettings("proxy_url").then((v) => { setProxyInput(v ?? ""); });
     api.getSettings("close_action").then((v) => { setCloseAction(v ?? ""); });
@@ -207,13 +203,8 @@ export function Settings() {
       const normalized = (v ?? "true").trim().toLowerCase();
       setShowTrayIcon(!(normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off"));
     });
-    api.getSettings("developer_mode").then((v) => {
-      setDeveloperMode(v === "true");
-    });
     api.getSettings("text_size").then((v) => { if (v) { setTextSize(v); applyTextSize(v); } });
     api.getSettings("skillsmp_api_key").then((v) => { if (v) setSkillsmpApiKey(v); });
-    api.getSettings("codebuddy_api_key").then((v) => { if (v) setCodebuddyApiKey(v); });
-    api.getSettings("codebuddy_internet_environment").then((v) => { if (v) setCodebuddyEnv(v); });
     api.getCentralRepoPath().then(setCentralRepoPath).catch(() => {});
 
     (async () => {
@@ -289,11 +280,6 @@ export function Settings() {
       setCloseAction("close");
       await api.setSettings("close_action", "close");
     }
-  };
-
-  const handleDeveloperModeChange = async (enabled: boolean) => {
-    setDeveloperMode(enabled);
-    await api.setSettings("developer_mode", enabled ? "true" : "false");
   };
 
   const handleLanguageChange = (lng: string) => {
@@ -380,19 +366,6 @@ export function Settings() {
       toast.error(t("common.error"));
     } finally {
       setSkillsmpSaving(false);
-    }
-  };
-
-  const handleSaveCodebuddy = async () => {
-    setCodebuddySaving(true);
-    try {
-      await api.setSettings("codebuddy_api_key", codebuddyApiKey.trim());
-      await api.setSettings("codebuddy_internet_environment", codebuddyEnv);
-      toast.success(t("common.success"));
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setCodebuddySaving(false);
     }
   };
 
@@ -561,6 +534,11 @@ export function Settings() {
                 {t("settings.customAgent")}
               </span>
             )}
+            {agent.is_custom && agent.project_relative_skills_dir && (
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                {t("settings.projectAgentSupported")}
+              </span>
+            )}
             {agent.has_path_override && !agent.is_custom && (
               <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
                 {t("settings.pathOverridden")}
@@ -604,9 +582,19 @@ export function Settings() {
           </button>
         </div>
       ) : (
-        <p className="truncate text-[12px] font-mono leading-tight text-muted" title={agent.skills_dir}>
-          {agent.installed ? compactHomePath(agent.skills_dir) : t("settings.notInstalled")}
-        </p>
+        <div className="space-y-1">
+          <p className="truncate text-[12px] font-mono leading-tight text-muted" title={agent.skills_dir}>
+            {agent.installed ? compactHomePath(agent.skills_dir) : t("settings.notInstalled")}
+          </p>
+          {agent.is_custom && agent.project_relative_skills_dir && (
+            <p
+              className="truncate text-[12px] font-mono leading-tight text-muted"
+              title={agent.project_relative_skills_dir}
+            >
+              {t("settings.projectSkillsPathValue", { path: agent.project_relative_skills_dir })}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -722,15 +710,32 @@ export function Settings() {
                     <FolderOpen className="w-3 h-3" />
                     {t("settings.selectFolder")}
                   </button>
-                  <button
-                    onClick={handleAddCustomAgent}
-                    disabled={addingCustom || !customName.trim() || !customPath.trim()}
-                    className={`${actionButtonClass} bg-accent text-white border-accent hover:opacity-90 disabled:opacity-50`}
-                  >
-                    {addingCustom ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                    {t("settings.addAgent")}
-                  </button>
                 </div>
+              </div>
+              <div>
+                <label className="text-[12px] text-muted mb-1 block">
+                  {t("settings.projectSkillsPath")}
+                </label>
+                <input
+                  type="text"
+                  value={customProjectPath}
+                  onChange={(e) => setCustomProjectPath(e.target.value)}
+                  placeholder={t("settings.projectSkillsPathPlaceholder")}
+                  className={`${fieldClass} w-full font-mono`}
+                />
+                <p className="mt-1 text-[12px] text-muted">
+                  {t("settings.projectSkillsPathDesc")}
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={handleAddCustomAgent}
+                  disabled={addingCustom || !customName.trim() || !customPath.trim()}
+                  className={`${actionButtonClass} bg-accent text-white border-accent hover:opacity-90 disabled:opacity-50`}
+                >
+                  {addingCustom ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  {t("settings.addAgent")}
+                </button>
               </div>
             </div>
           )}
@@ -840,40 +845,6 @@ export function Settings() {
                   )}
                 >
                   <Copy className="w-3 h-3" /> {t("settings.copy")}
-                </button>
-              </div>
-            </div>
-
-            {/* Sync scope */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.syncScope")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.syncScopeDesc")}</p>
-              </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
-                <button
-                  onClick={async () => {
-                    setSyncScope("scenario");
-                    await api.setSkillSyncScope("scenario");
-                  }}
-                  className={cn(
-                    segmentedButtonClass,
-                    syncScope === "scenario" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  <Layers className="w-3 h-3" /> {t("settings.syncScope_scenario")}
-                </button>
-                <button
-                  onClick={async () => {
-                    setSyncScope("global");
-                    await api.setSkillSyncScope("global");
-                  }}
-                  className={cn(
-                    segmentedButtonClass,
-                    syncScope === "global" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  <Globe className="w-3 h-3" /> {t("settings.syncScope_global")}
                 </button>
               </div>
             </div>
@@ -1025,34 +996,6 @@ export function Settings() {
                 </button>
               </div>
             </div>
-
-            {/* Developer mode */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.developerMode")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.developerModeDesc")}</p>
-              </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
-                <button
-                  onClick={() => handleDeveloperModeChange(true)}
-                  className={cn(
-                    segmentedButtonClass,
-                    developerMode ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  {t("settings.developerMode_on")}
-                </button>
-                <button
-                  onClick={() => handleDeveloperModeChange(false)}
-                  className={cn(
-                    segmentedButtonClass,
-                    !developerMode ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  {t("settings.developerMode_off")}
-                </button>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -1123,67 +1066,6 @@ export function Settings() {
                   className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
                 >
                   {skillsmpSaving ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Key className="w-3 h-3" />
-                  )}
-                  {t("common.save")}
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* CodeBuddy API Key */}
-        <section>
-          <h2 className="app-section-title mb-3">
-            {t("settings.codebuddyTitle", { defaultValue: "CodeBuddy AI" })}
-          </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-subtle">
-            <div className="px-4 py-3">
-              <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.codebuddyApiKey", { defaultValue: "API Key" })}</h3>
-              <p className="text-[13px] text-muted mb-2">
-                {t("settings.codebuddyDesc", { defaultValue: "Enter your CodeBuddy API key to enable AI features (skill tagging, scenario generation, etc.)." })}{" "}
-                <button
-                  type="button"
-                  onClick={() => openUrl("https://tencent.sso.copilot.tencent.com/profile/keys")}
-                  className="inline-flex items-center gap-0.5 text-accent-light hover:underline"
-                >
-                  {t("settings.codebuddyGetKey", { defaultValue: "Get your API key" })}
-                  <ExternalLink className="h-3 w-3" />
-                </button>
-              </p>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <input
-                  type="password"
-                  value={codebuddyApiKey}
-                  onChange={(e) => setCodebuddyApiKey(e.target.value)}
-                  placeholder={t("settings.codebuddyApiKeyPlaceholder", { defaultValue: "API key..." })}
-                  className={`${fieldClass} min-w-0 flex-1 font-mono`}
-                />
-              </div>
-              <h3 className="text-[13px] text-secondary font-medium mb-0.5 mt-3">{t("settings.codebuddyEnv", { defaultValue: "Environment" })}</h3>
-              <p className="text-[13px] text-muted mb-2">
-                {t("settings.codebuddyEnvDesc", { defaultValue: "Select the CodeBuddy deployment environment." })}
-              </p>
-              <div className="flex items-center gap-2 mb-2">
-                <select
-                  value={codebuddyEnv}
-                  onChange={(e) => setCodebuddyEnv(e.target.value)}
-                  className={`${fieldClass} min-w-0 w-auto`}
-                >
-                  <option value="">{t("settings.codebuddyEnvAuto", { defaultValue: "Auto (overseas)" })}</option>
-                  <option value="internal">{t("settings.codebuddyEnvInternal", { defaultValue: "China (copilot.tencent.com)" })}</option>
-                  <option value="ioa">{t("settings.codebuddyEnvIoa", { defaultValue: "iOA (tencent.sso.copilot.tencent.com)" })}</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleSaveCodebuddy}
-                  disabled={codebuddySaving}
-                  className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
-                >
-                  {codebuddySaving ? (
                     <Loader2 className="w-3 h-3 animate-spin" />
                   ) : (
                     <Key className="w-3 h-3" />

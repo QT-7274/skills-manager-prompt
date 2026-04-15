@@ -10,6 +10,7 @@ export interface ToolInfo {
   enabled: boolean;
   is_custom: boolean;
   has_path_override: boolean;
+  project_relative_skills_dir: string | null;
 }
 
 export interface ManagedSkill {
@@ -80,18 +81,6 @@ export interface Scenario {
   updated_at: number;
 }
 
-export interface Recipe {
-  id: string;
-  scenario_id: string;
-  name: string;
-  description: string | null;
-  icon: string | null;
-  prompt_template: string | null;
-  sort_order: number;
-  created_at: number;
-  updated_at: number;
-}
-
 export interface DiscoveredGroup {
   name: string;
   fingerprint: string | null;
@@ -126,6 +115,9 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  workspace_type: "project" | "linked";
+  linked_agent_name: string | null;
+  supports_skill_toggle: boolean;
   sort_order: number;
   skill_count: number;
   sync_health: SyncHealth;
@@ -133,13 +125,24 @@ export interface Project {
   updated_at: number;
 }
 
+export interface ProjectAgentTarget {
+  key: string;
+  display_name: string;
+  enabled: boolean;
+  installed: boolean;
+  is_custom: boolean;
+}
+
 export interface ProjectSkill {
   name: string;
   dir_name: string;
+  relative_path: string;
   description: string | null;
   path: string;
   files: string[];
   enabled: boolean;
+  agent: string;
+  agent_display_name: string;
   in_center: boolean;
   sync_status: "project_only" | "in_sync" | "project_newer" | "center_newer" | "diverged";
   center_skill_id: string | null;
@@ -167,8 +170,18 @@ export const setCustomToolPath = (key: string, path: string) =>
 export const resetCustomToolPath = (key: string) =>
   invoke<void>("reset_custom_tool_path", { key });
 
-export const addCustomTool = (key: string, displayName: string, skillsDir: string) =>
-  invoke<void>("add_custom_tool", { key, displayName, skillsDir });
+export const addCustomTool = (
+  key: string,
+  displayName: string,
+  skillsDir: string,
+  projectRelativeSkillsDir?: string,
+) =>
+  invoke<void>("add_custom_tool", {
+    key,
+    displayName,
+    skillsDir,
+    projectRelativeSkillsDir: projectRelativeSkillsDir ?? null,
+  });
 
 export const removeCustomTool = (key: string) =>
   invoke<void>("remove_custom_tool", { key });
@@ -252,50 +265,11 @@ export const updateSkill = (skillId: string) =>
 export const reimportLocalSkill = (skillId: string) =>
   invoke<ManagedSkill>("reimport_local_skill", { skillId });
 
-export interface OnlineMatchResult {
-  skill_id: string;
-  name: string;
-  source: string;
-  origin: string;
-  installs: number;
-  similarity: number;
-}
+export const relinkLocalSkillSource = (skillId: string, sourcePath: string) =>
+  invoke<ManagedSkill>("relink_local_skill_source", { skillId, sourcePath });
 
-export const searchOnlineMatches = (skillId: string) =>
-  invoke<OnlineMatchResult[]>("search_online_matches", { skillId });
-
-export const convertImportToOnline = (
-  skillId: string,
-  onlineSource: string,
-  onlineSkillId: string,
-  origin: string,
-) =>
-  invoke<ManagedSkill>("convert_import_to_online", {
-    skillId,
-    onlineSource,
-    onlineSkillId,
-    origin,
-  });
-
-export type BatchOnlineSearchResult = Record<string, OnlineMatchResult[]>;
-
-export const searchBatchOnlineMatches = (skillIds: string[]) =>
-  invoke<BatchOnlineSearchResult>("search_batch_online_matches", { skillIds });
-
-export interface BatchConversionItem {
-  skill_id: string;
-  online_source: string;
-  online_skill_id: string;
-  origin: string;
-}
-
-export interface BatchConvertResult {
-  succeeded: string[];
-  failed: [string, string][];
-}
-
-export const convertBatchImportToOnline = (items: BatchConversionItem[]) =>
-  invoke<BatchConvertResult>("convert_batch_import_to_online", { items });
+export const detachLocalSkillSource = (skillId: string) =>
+  invoke<ManagedSkill>("detach_local_skill_source", { skillId });
 
 export interface BatchImportResult {
   imported: number;
@@ -392,25 +366,6 @@ export interface AppUpdateInfo {
 export const checkAppUpdate = () =>
   invoke<AppUpdateInfo>("check_app_update");
 
-// ── AI ──
-
-export interface AiResult {
-  tags?: string[];
-  prompt?: string;
-  recipes?: Array<{ name: string; prompt_template: string }>;
-  scenarios?: {
-    name: string;
-    description: string;
-    icon: string;
-    skillNames: string[];
-  }[];
-  results?: Record<string, string[]>;
-  mapping?: Record<string, string[]>;
-}
-
-export const invokeCodebuddyAgent = (task: string, payload: Record<string, unknown>) =>
-  invoke<AiResult>("invoke_codebuddy_agent", { task, payload });
-
 // ── Git Backup ──
 
 export interface GitBackupStatus {
@@ -495,9 +450,6 @@ export const deleteScenario = (id: string) =>
 export const switchScenario = (id: string) =>
   invoke<void>("switch_scenario", { id });
 
-export const setSkillSyncScope = (scope: string) =>
-  invoke<void>("set_skill_sync_scope", { scope });
-
 export const addSkillToScenario = (skillId: string, scenarioId: string) =>
   invoke<void>("add_skill_to_scenario", { skillId, scenarioId });
 
@@ -516,41 +468,6 @@ export const getScenarioSkillOrder = (scenarioId: string) =>
 export const reorderScenarioSkills = (scenarioId: string, skillIds: string[]) =>
   invoke<void>("reorder_scenario_skills", { scenarioId, skillIds });
 
-export const saveScenarioPromptTemplate = (scenarioId: string, template: string | null) =>
-  invoke<void>("save_scenario_prompt_template", { scenarioId, template });
-
-export const getScenarioPromptTemplate = (scenarioId: string) =>
-  invoke<string | null>("get_scenario_prompt_template", { scenarioId });
-
-// ── Recipes ──
-
-export const createRecipe = (scenarioId: string, name: string, description?: string | null, icon?: string | null, promptTemplate?: string | null) =>
-  invoke<Recipe>("create_recipe", { scenarioId, name, description: description ?? null, icon: icon ?? null, promptTemplate: promptTemplate ?? null });
-
-export const updateRecipe = (id: string, name: string, description?: string | null, icon?: string | null) =>
-  invoke<void>("update_recipe", { id, name, description: description ?? null, icon: icon ?? null });
-
-export const deleteRecipe = (id: string) =>
-  invoke<void>("delete_recipe", { id });
-
-export const getRecipesForScenario = (scenarioId: string) =>
-  invoke<Recipe[]>("get_recipes_for_scenario", { scenarioId });
-
-export const saveRecipePromptTemplate = (recipeId: string, template: string | null) =>
-  invoke<void>("save_recipe_prompt_template", { recipeId, template });
-
-export const getRecipePromptTemplate = (recipeId: string) =>
-  invoke<string | null>("get_recipe_prompt_template", { recipeId });
-
-export const setRecipeSkills = (recipeId: string, skillIds: string[]) =>
-  invoke<void>("set_recipe_skills", { recipeId, skillIds });
-
-export const getRecipeSkills = (recipeId: string) =>
-  invoke<ManagedSkill[]>("get_recipe_skills", { recipeId });
-
-export const reorderRecipes = (scenarioId: string, recipeIds: string[]) =>
-  invoke<void>("reorder_recipes", { scenarioId, recipeIds });
-
 // ── Projects ──
 
 export const getProjects = () => invoke<Project[]>("get_projects");
@@ -558,35 +475,45 @@ export const getProjects = () => invoke<Project[]>("get_projects");
 export const addProject = (path: string) =>
   invoke<Project>("add_project", { path });
 
+export const addLinkedWorkspace = (name: string, path: string, disabledPath?: string) =>
+  invoke<Project>("add_linked_workspace", {
+    name,
+    path,
+    disabledPath: disabledPath ?? null,
+  });
+
 export const removeProject = (id: string) =>
   invoke<void>("remove_project", { id });
 
 export const scanProjects = (root: string) =>
   invoke<string[]>("scan_projects", { root });
 
+export const getProjectAgentTargets = (projectId: string) =>
+  invoke<ProjectAgentTarget[]>("get_project_agent_targets", { projectId });
+
 export const getProjectSkills = (projectId: string) =>
   invoke<ProjectSkill[]>("get_project_skills", { projectId });
 
-export const getProjectSkillDocument = (projectPath: string, skillDirName: string) =>
-  invoke<ProjectSkillDocument>("get_project_skill_document", { projectPath, skillDirName });
+export const getProjectSkillDocument = (projectId: string, skillRelativePath: string, agent: string) =>
+  invoke<ProjectSkillDocument>("get_project_skill_document", { projectId, skillRelativePath, agent });
 
-export const importProjectSkillToCenter = (projectId: string, skillDirName: string) =>
-  invoke<void>("import_project_skill_to_center", { projectId, skillDirName });
+export const importProjectSkillToCenter = (projectId: string, skillRelativePath: string, agent: string) =>
+  invoke<void>("import_project_skill_to_center", { projectId, skillRelativePath, agent });
 
-export const exportSkillToProject = (skillId: string, projectId: string) =>
-  invoke<void>("export_skill_to_project", { skillId, projectId });
+export const exportSkillToProject = (skillId: string, projectId: string, agents?: string[]) =>
+  invoke<void>("export_skill_to_project", { skillId, projectId, agents: agents ?? null });
 
-export const updateProjectSkillToCenter = (projectId: string, skillDirName: string) =>
-  invoke<void>("update_project_skill_to_center", { projectId, skillDirName });
+export const updateProjectSkillToCenter = (projectId: string, skillRelativePath: string, agent: string) =>
+  invoke<void>("update_project_skill_to_center", { projectId, skillRelativePath, agent });
 
-export const updateProjectSkillFromCenter = (projectId: string, skillDirName: string) =>
-  invoke<void>("update_project_skill_from_center", { projectId, skillDirName });
+export const updateProjectSkillFromCenter = (projectId: string, skillRelativePath: string, agent: string) =>
+  invoke<void>("update_project_skill_from_center", { projectId, skillRelativePath, agent });
 
-export const toggleProjectSkill = (projectId: string, skillDirName: string, enabled: boolean) =>
-  invoke<void>("toggle_project_skill", { projectId, skillDirName, enabled });
+export const toggleProjectSkill = (projectId: string, skillRelativePath: string, agent: string, enabled: boolean) =>
+  invoke<void>("toggle_project_skill", { projectId, skillRelativePath, agent, enabled });
 
-export const deleteProjectSkill = (projectId: string, skillDirName: string) =>
-  invoke<void>("delete_project_skill", { projectId, skillDirName });
+export const deleteProjectSkill = (projectId: string, skillRelativePath: string, agent: string) =>
+  invoke<void>("delete_project_skill", { projectId, skillRelativePath, agent });
 
 export const slugifySkillNames = (names: string[]) =>
   invoke<string[]>("slugify_skill_names", { names });

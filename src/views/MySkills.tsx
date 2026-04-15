@@ -21,22 +21,16 @@ import {
   SquareCheck,
   Square,
   GripVertical,
-  FileText,
-  ArrowRight,
-  Sparkles,
 } from "lucide-react";
+import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { cn, mergeTags, truncateSkillContent, applyTagMapping } from "../utils";
+import { cn } from "../utils";
 import { useApp } from "../context/AppContext";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { OnlineMatchDialog } from "../components/OnlineMatchDialog";
-import { BatchOnlineMatchDialog, type BatchMatchItem } from "../components/BatchOnlineMatchDialog";
 import { SkillDetailPanel } from "../components/SkillDetailPanel";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
-import { ScenarioPromptEditor, extractUsedSkillNames } from "../components/ScenarioPromptEditor";
-import type { ScenarioPromptEditorHandle } from "../components/ScenarioPromptEditor";
 import * as api from "../lib/tauri";
 import type {
   ManagedSkill,
@@ -44,7 +38,6 @@ import type {
   GitBackupStatus,
   GitBackupVersion,
   SkillToolToggle,
-  OnlineMatchResult,
 } from "../lib/tauri";
 import { getErrorMessage, getErrorKind } from "../lib/error";
 import {
@@ -142,14 +135,6 @@ export function MySkills() {
   const [checkingAll, setCheckingAll] = useState(false);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
-  const [updatingAll, setUpdatingAll] = useState(false);
-  const [onlineMatchTarget, setOnlineMatchTarget] = useState<ManagedSkill | null>(null);
-  const [onlineMatches, setOnlineMatches] = useState<OnlineMatchResult[]>([]);
-  const [searchingOnline, setSearchingOnline] = useState(false);
-  const [batchMatchDialogOpen, setBatchMatchDialogOpen] = useState(false);
-  const [batchMatchItems, setBatchMatchItems] = useState<BatchMatchItem[]>([]);
-  const [batchSearching, setBatchSearching] = useState(false);
-  const [batchConverting, setBatchConverting] = useState(false);
   const [toolToggles, setToolToggles] = useState<SkillToolToggle[] | null>(null);
   const [togglingToolKey, setTogglingToolKey] = useState<string | null>(null);
   const [gitStatus, setGitStatus] = useState<GitBackupStatus | null>(null);
@@ -161,34 +146,15 @@ export function MySkills() {
   const [restoreVersionTag, setRestoreVersionTag] = useState<string | null>(null);
   const [restoringVersionTag, setRestoringVersionTag] = useState<string | null>(null);
   const [tagEditSkillId, setTagEditSkillId] = useState<string | null>(null);
-  const [aiTaggingSkillId, setAiTaggingSkillId] = useState<string | null>(null);
-  const [batchTagging, setBatchTagging] = useState(false);
-  const [batchTagProgress, setBatchTagProgress] = useState<{ current: number; total: number } | null>(null);
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
-  const [isPromptEditorMode, setIsPromptEditorMode] = useState(false);
-  const prevActiveScenarioIdRef = useRef<string | undefined>(undefined);
-  const promptEditorRef = useRef<ScenarioPromptEditorHandle>(null);
-  const [promptUsedSkillNames, setPromptUsedSkillNames] = useState<Set<string>>(new Set());
 
   const [scenarioSkillOrder, setScenarioSkillOrder] = useState<string[]>([]);
 
   const activeScenarioName = activeScenario?.name || t("mySkills.currentScenarioFallback");
 
-  const handlePromptTemplateChange = useCallback((template: string) => {
-    setPromptUsedSkillNames(extractUsedSkillNames(template));
-  }, []);
-
   // Fetch sort order whenever active scenario changes
   useEffect(() => {
-    // Only reset prompt editor when the actual scenario switches, not on skills refresh
-    const prevId = prevActiveScenarioIdRef.current;
-    const curId = activeScenario?.id;
-    if (prevId !== curId) {
-      setIsPromptEditorMode(false);
-      setPromptUsedSkillNames(new Set());
-      prevActiveScenarioIdRef.current = curId;
-    }
     if (!activeScenario) {
       setScenarioSkillOrder([]);
       return;
@@ -253,8 +219,6 @@ export function MySkills() {
 
     return result;
   }, [skills, search, sourceFilters, tagFilters, filterMode, activeScenario, scenarioSkillOrder]);
-
-  const hasUntaggedSkills = useMemo(() => skills.some((s) => s.tags.length === 0), [skills]);
 
   const {
     isMultiSelect, setIsMultiSelect,
@@ -375,42 +339,33 @@ export function MySkills() {
     }
   }, [gitStatus?.is_repo]);
 
-  const refreshGitRemoteConfig = useCallback(
-    async (existingStatus?: GitBackupStatus | null) => {
-      const saved = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
-      if (saved) {
-        setGitRemoteConfig(saved);
-        return;
-      }
-      const detected = existingStatus?.remote_url?.trim() || "";
-      if (detected) {
-        setGitRemoteConfig(detected);
-        api.setSettings("git_backup_remote_url", detected).catch(() => {});
-      }
-    },
-    [],
-  );
-
   useEffect(() => {
     (async () => {
-      const [, status] = await Promise.all([
-        api.getSettings("git_backup_remote_url").catch(() => null),
-        api.gitBackupStatus().catch(() => null),
-      ]);
-      setGitStatus(status);
-      await refreshGitRemoteConfig(status);
-    })();
-  }, [refreshGitRemoteConfig]);
-
-  useEffect(() => {
-    const refreshAll = async () => {
+      const savedRemote = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
       const status = await api.gitBackupStatus().catch(() => null);
       setGitStatus(status);
-      await refreshGitRemoteConfig(status);
+
+      if (savedRemote) {
+        setGitRemoteConfig(savedRemote);
+        return;
+      }
+
+      const detectedRemote = status?.remote_url?.trim() || "";
+      if (detectedRemote) {
+        setGitRemoteConfig(detectedRemote);
+        api.setSettings("git_backup_remote_url", detectedRemote).catch(() => {});
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      refreshGitStatus();
     };
-    const handleWindowFocus = () => { refreshAll(); };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") refreshAll();
+      if (document.visibilityState === "visible") {
+        refreshGitStatus();
+      }
     };
 
     window.addEventListener("focus", handleWindowFocus);
@@ -419,7 +374,7 @@ export function MySkills() {
       window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refreshGitRemoteConfig]);
+  }, [refreshGitStatus]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -564,70 +519,12 @@ export function MySkills() {
     try {
       await api.checkAllSkillUpdates(true);
       toast.success(t("mySkills.updateActions.checkedAll"));
-
-      // Check for import skills and search online matches
-      const importSkills = skills.filter((s) => s.source_type === "import");
-      if (importSkills.length > 0) {
-        const skillIds = importSkills.map((s) => s.id);
-        setBatchSearching(true);
-        setBatchMatchDialogOpen(true);
-        try {
-          const searchResults = await api.searchBatchOnlineMatches(skillIds);
-          const items: BatchMatchItem[] = importSkills
-            .map((skill) => ({
-              skill_id: skill.id,
-              skill_name: skill.name,
-              matches: searchResults[skill.id] ?? [],
-            }))
-            .filter((item) => item.matches.length > 0);
-
-          if (items.length > 0) {
-            setBatchMatchItems(items);
-          } else {
-            setBatchMatchDialogOpen(false);
-            toast.info(t("mySkills.updateActions.noImportSkillsWithMatches"));
-          }
-        } catch {
-          setBatchMatchDialogOpen(false);
-        } finally {
-          setBatchSearching(false);
-        }
-      }
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, t("common.error")));
     } finally {
       await refreshManagedSkills();
       setCheckingAll(false);
     }
-  };
-
-  const handleUpdateAll = async () => {
-    const updatable = skills.filter(
-      (s) => s.update_status === "update_available" && (s.source_type === "git" || s.source_type === "skillssh")
-    );
-    if (updatable.length === 0) return;
-    setUpdatingAll(true);
-    let succeeded = 0;
-    let failed = 0;
-    for (const skill of updatable) {
-      try {
-        setUpdatingSkillId(skill.id);
-        await api.updateSkill(skill.id);
-        succeeded++;
-      } catch {
-        failed++;
-      } finally {
-        setUpdatingSkillId(null);
-      }
-    }
-    if (succeeded > 0) {
-      toast.success(t("mySkills.updateActions.updatedAll", { count: succeeded }));
-    }
-    if (failed > 0) {
-      toast.error(t("mySkills.updateActions.updateAllFailed", { count: failed }));
-    }
-    await refreshManagedSkills();
-    setUpdatingAll(false);
   };
 
   const handleCheckUpdate = async (skill: ManagedSkill) => {
@@ -644,24 +541,9 @@ export function MySkills() {
   };
 
   const handleRefreshSkill = async (skill: ManagedSkill) => {
-    if (skill.source_type === "import") {
-      setOnlineMatchTarget(skill);
-      setSearchingOnline(true);
-      try {
-        const matches = await api.searchOnlineMatches(skill.id);
-        setOnlineMatches(matches);
-      } catch (error: unknown) {
-        toast.error(getErrorMessage(error, t("common.error")));
-        setOnlineMatchTarget(null);
-      } finally {
-        setSearchingOnline(false);
-      }
-      return;
-    }
-
     setUpdatingSkillId(skill.id);
     try {
-      if (skill.source_type === "local") {
+      if (skill.source_type === "local" || skill.source_type === "import") {
         await api.reimportLocalSkill(skill.id);
         toast.success(t("mySkills.updateActions.reimported"));
       } else {
@@ -681,23 +563,32 @@ export function MySkills() {
     }
   };
 
-  const handleSelectOnlineMatch = async (match: OnlineMatchResult) => {
-    if (!onlineMatchTarget) return;
-    setUpdatingSkillId(onlineMatchTarget.id);
+  const handleRelinkSource = async (skill: ManagedSkill) => {
+    const selected = await dialogOpen({ directory: true, multiple: false });
+    if (!selected || Array.isArray(selected)) return;
+
+    setUpdatingSkillId(skill.id);
     try {
-      const origin = match.origin === "skillsmp" ? "skillssh" : match.origin;
-      await api.convertImportToOnline(
-        onlineMatchTarget.id,
-        match.source,
-        match.skill_id.split("/").pop() ?? match.name,
-        origin,
-      );
-      toast.success(t("mySkills.updateActions.convertedToOnline"));
-      setOnlineMatchTarget(null);
-      setOnlineMatches([]);
+      await api.relinkLocalSkillSource(skill.id, selected);
+      toast.success(t("mySkills.updateActions.relinked"));
       await refreshManagedSkills();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, t("common.error")));
+      await refreshManagedSkills();
+    } finally {
+      setUpdatingSkillId(null);
+    }
+  };
+
+  const handleDetachSource = async (skill: ManagedSkill) => {
+    setUpdatingSkillId(skill.id);
+    try {
+      await api.detachLocalSkillSource(skill.id);
+      toast.success(t("mySkills.updateActions.detachedSource"));
+      await refreshManagedSkills();
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, t("common.error")));
+      await refreshManagedSkills();
     } finally {
       setUpdatingSkillId(null);
     }
@@ -719,163 +610,6 @@ export function MySkills() {
       toast.error(getErrorMessage(error, t("common.error")));
     }
   };
-
-  const handleAiTag = async (skill: ManagedSkill) => {
-    const apiKeyCheck = await api.getSettings("codebuddy_api_key");
-    if (!apiKeyCheck) {
-      toast.error(t("mySkills.aiTaggingNoApiKey"));
-      return;
-    }
-    setAiTaggingSkillId(skill.id);
-    try {
-      let skillContent = "";
-      try {
-        const doc = await api.getSkillDocument(skill.id);
-        if (doc) skillContent = doc.content;
-      } catch {
-        // no doc available
-      }
-      const result = await api.invokeCodebuddyAgent("tag_skill", {
-        skillName: skill.name,
-        skillContent: skillContent || `${skill.name}\n${skill.description || ""}`,
-      });
-      if (result.tags && result.tags.length > 0) {
-        await api.setSkillTags(skill.id, mergeTags(skill.tags, result.tags));
-        toast.success(t("mySkills.aiTaggingSuccess"));
-        await refreshManagedSkills();
-      }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t("mySkills.aiTaggingError");
-      toast.error(msg);
-    } finally {
-      setAiTaggingSkillId(null);
-    }
-  };
-
-  const handleBatchAiTag = async (targetSkills?: ManagedSkill[]) => {
-    const apiKeyCheck = await api.getSettings("codebuddy_api_key");
-    if (!apiKeyCheck) {
-      toast.error(t("mySkills.aiTaggingNoApiKey"));
-      return;
-    }
-
-    const targets = targetSkills ?? skills.filter((s) => s.tags.length === 0);
-    if (targets.length === 0) return;
-
-    setBatchTagging(true);
-    const BATCH_SIZE = 5;
-    let succeeded = 0;
-    let failed = 0;
-    const toastId = toast.loading(t("mySkills.batchTaggingProgress", { current: 0, total: targets.length }));
-    const targetsById = new Map(targets.map((s) => [s.id, s]));
-
-    try {
-      // Fetch all skill documents in parallel
-      const skillContents = await Promise.all(
-        targets.map(async (skill) => {
-          let content = "";
-          try {
-            const doc = await api.getSkillDocument(skill.id);
-            if (doc) content = truncateSkillContent(doc.content);
-          } catch {
-            // fallback below
-          }
-          return {
-            id: skill.id,
-            name: skill.name,
-            content: content || `${skill.name}\n${skill.description || ""}`,
-          };
-        })
-      );
-
-      // Process in batches
-      for (let i = 0; i < skillContents.length; i += BATCH_SIZE) {
-        const batch = skillContents.slice(i, i + BATCH_SIZE);
-        const batchEnd = Math.min(i + BATCH_SIZE, skillContents.length);
-        setBatchTagProgress({ current: batchEnd, total: skillContents.length });
-        toast.loading(t("mySkills.batchTaggingProgress", { current: batchEnd, total: skillContents.length }), { id: toastId });
-
-        try {
-          const result = await api.invokeCodebuddyAgent("batch_tag_skills", {
-            skills: batch.map((s) => ({ name: s.name, content: s.content })),
-          });
-
-          if (result.results) {
-            // Build a case-insensitive lookup for AI response keys
-            const resultsByNormalizedName = new Map<string, string[]>();
-            for (const [key, tags] of Object.entries(result.results)) {
-              resultsByNormalizedName.set(key.toLowerCase().trim(), tags);
-            }
-
-            const updates: Promise<void>[] = [];
-            for (const item of batch) {
-              const newTags = resultsByNormalizedName.get(item.name.toLowerCase().trim());
-              if (newTags && newTags.length > 0) {
-                const skill = targetsById.get(item.id);
-                const merged = mergeTags(skill?.tags ?? [], newTags);
-                updates.push(api.setSkillTags(item.id, merged));
-                succeeded++;
-              }
-            }
-            await Promise.all(updates);
-          }
-        } catch (err) {
-          const devMode = await api.getSettings("developer_mode") === "true";
-          if (devMode) {
-            const msg = err instanceof Error ? err.message : JSON.stringify(err);
-            toast.error(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${msg}`);
-          }
-          failed += batch.length;
-        }
-
-        await refreshManagedSkills();
-      }
-
-      // Auto-consolidate tags after successful batch tagging
-      if (succeeded > 0) {
-        setBatchTagProgress(null);
-        toast.loading(t("mySkills.consolidatingTags"), { id: toastId });
-        try {
-          const freshSkills = await api.getManagedSkills();
-          const freshTags = [...new Set(freshSkills.flatMap((s) => s.tags))];
-          if (freshTags.length >= 10) {
-            const consolidateResult = await api.invokeCodebuddyAgent("consolidate_tags", {
-              tags: freshTags,
-            });
-            if (consolidateResult.mapping) {
-              const updates: Promise<void>[] = [];
-              for (const skill of freshSkills) {
-                if (skill.tags.length === 0) continue;
-                const mapped = applyTagMapping(consolidateResult.mapping, skill.tags);
-                if (mapped) updates.push(api.setSkillTags(skill.id, mapped));
-              }
-              await Promise.all(updates);
-            }
-          }
-        } catch {
-          // Consolidation failure is non-critical; tags are already saved
-        }
-        await refreshManagedSkills();
-      }
-
-      toast.dismiss(toastId);
-      if (succeeded > 0) {
-        toast.success(t("mySkills.batchTaggingSuccess", { count: succeeded }));
-      }
-      if (failed > 0) {
-        toast.error(t("mySkills.batchTaggingFailed", { count: failed }));
-      }
-    } catch (error: unknown) {
-      toast.dismiss(toastId);
-      const msg = error instanceof Error ? error.message : t("mySkills.aiTaggingError");
-      toast.error(msg);
-    } finally {
-      setBatchTagging(false);
-      setBatchTagProgress(null);
-      if (isMultiSelect) exitMultiSelect();
-    }
-  };
-
 
   const handleRemoveTag = async (skill: ManagedSkill, tagToRemove: string) => {
     try {
@@ -996,12 +730,7 @@ export function MySkills() {
         toneClassName: "text-red-500",
       };
     }
-    if (
-      (!gitStatus.remote_url && gitRemoteConfig) ||
-      gitStatus.has_changes ||
-      gitStatus.ahead > 0 ||
-      gitStatus.behind > 0
-    ) {
+    if (gitStatus.has_changes || gitStatus.ahead > 0 || gitStatus.behind > 0) {
       return {
         label: t("mySkills.gitRepoSync"),
         disabled: false,
@@ -1038,8 +767,7 @@ export function MySkills() {
   const canRefresh = (skill: ManagedSkill) =>
     skill.source_type === "git" ||
     skill.source_type === "skillssh" ||
-    skill.source_type === "local" ||
-    skill.source_type === "import";
+    ((skill.source_type === "local" || skill.source_type === "import") && !!skill.source_ref);
 
   const sourceTypeLabel = (skill: ManagedSkill) =>
     skill.source_type === "skillssh" ? "skills.sh" : skill.source_type;
@@ -1067,9 +795,7 @@ export function MySkills() {
   };
 
   const refreshLabel = (skill: ManagedSkill) =>
-    skill.source_type === "import"
-      ? t("mySkills.updateActions.findOnline")
-      : skill.source_type === "local"
+    skill.source_type === "local" || skill.source_type === "import"
       ? t("mySkills.updateActions.reimport")
       : t("mySkills.updateActions.update");
 
@@ -1189,21 +915,6 @@ export function MySkills() {
             })()
           )}
           <button
-            onClick={() => handleBatchAiTag()}
-            disabled={batchTagging || !hasUntaggedSkills}
-            className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-accent transition-colors hover:bg-accent-bg disabled:opacity-50"
-            title={t("mySkills.batchAiTagAll")}
-          >
-            {batchTagging
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <Sparkles className="h-3.5 w-3.5" />}
-            {batchTagging
-              ? (batchTagProgress
-                  ? t("mySkills.batchTaggingProgress", batchTagProgress)
-                  : t("mySkills.consolidatingTags"))
-              : t("mySkills.batchAiTagAll")}
-          </button>
-          <button
             onClick={handleCheckAllUpdates}
             disabled={checkingAll}
             className="ml-2 mr-2 inline-flex items-center gap-1 rounded-md border-l border-border-subtle pl-4 pr-3 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
@@ -1211,18 +922,6 @@ export function MySkills() {
             <RefreshCw className={cn("h-3.5 w-3.5", checkingAll && "animate-spin")} />
             {t("mySkills.updateActions.checkAll")}
           </button>
-          {skills.some((s) => s.update_status === "update_available") && (
-            <button
-              onClick={handleUpdateAll}
-              disabled={updatingAll || checkingAll}
-              className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-accent transition-colors hover:bg-accent-bg disabled:opacity-50"
-            >
-              <ArrowUpCircle className={cn("h-3.5 w-3.5", updatingAll && "animate-spin")} />
-              {t("mySkills.updateActions.updateAll", {
-                count: skills.filter((s) => s.update_status === "update_available").length,
-              })}
-            </button>
-          )}
           <button
             onClick={() => setViewMode("grid")}
             className={cn(
@@ -1251,18 +950,6 @@ export function MySkills() {
           >
             <SquareCheck className="h-4 w-4" />
           </button>
-          {activeScenario && (
-            <button
-              onClick={() => setIsPromptEditorMode(!isPromptEditorMode)}
-              className={cn(
-                "rounded-md p-2 transition-colors outline-none",
-                isPromptEditorMode ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-              )}
-              title={t("mySkills.promptEditor.button")}
-            >
-              <FileText className="h-4 w-4" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -1339,17 +1026,11 @@ export function MySkills() {
             selectAll: t("mySkills.selectAll"),
             deselectAll: t("mySkills.deselectAll"),
             cancel: t("common.cancel"),
-            aiTag: t("mySkills.batchAiTag", { count: selectedIds.size }),
           }}
           onDelete={() => setBatchDeleteConfirm(true)}
           onToggle={handleBatchToggleScenario}
           onSelectAll={handleSelectAll}
           onCancel={exitMultiSelect}
-          onAiTag={() => {
-            const selected = skills.filter((s) => selectedIds.has(s.id));
-            handleBatchAiTag(selected);
-          }}
-          aiTagging={batchTagging}
         />
       )}
 
@@ -1405,7 +1086,7 @@ export function MySkills() {
         </div>
       )}
 
-      {filtered.length === 0 && !isPromptEditorMode ? (
+      {filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center pb-20 text-center">
           <Layers className="mb-4 h-12 w-12 text-faint" />
           <h3 className="mb-1.5 text-[14px] font-semibold text-tertiary">{t("mySkills.noSkills")}</h3>
@@ -1415,9 +1096,6 @@ export function MySkills() {
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <div className={cn("flex gap-4", isPromptEditorMode && "flex-1")}>
-          {/* Skills grid/list */}
-          <div className={cn(isPromptEditorMode ? "w-1/2 min-w-0 max-h-[calc(100vh-220px)] overflow-y-auto scrollbar-hide" : "flex-1")}>
           <SortableContext
             items={filtered.map((s) => s.id)}
             strategy={viewMode === "grid" ? rectSortingStrategy : verticalListSortingStrategy}
@@ -1426,9 +1104,7 @@ export function MySkills() {
             className={cn(
               "pb-8",
               viewMode === "grid"
-                ? isPromptEditorMode
-                  ? "grid grid-cols-2 gap-3"
-                  : "grid grid-cols-2 gap-3 lg:grid-cols-3"
+                ? "grid grid-cols-2 gap-3 lg:grid-cols-3"
                 : "flex flex-col gap-0.5"
             )}
           >
@@ -1438,6 +1114,9 @@ export function MySkills() {
               ? skill.scenario_ids.includes(activeScenario.id)
               : false;
             const badge = statusBadge(skill);
+            const isMissingLocalSource =
+              skill.update_status === "source_missing"
+              && (skill.source_type === "local" || skill.source_type === "import");
 
             if (viewMode === "grid") {
               return (
@@ -1448,8 +1127,7 @@ export function MySkills() {
                     "app-panel group relative flex h-full flex-col overflow-hidden transition-all hover:border-border hover:bg-surface-hover",
                     enabledInScenario && "border-l-2 border-l-accent",
                     isMultiSelect && "cursor-pointer",
-                    isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40",
-                    isPromptEditorMode && promptUsedSkillNames.has(skill.name) && "opacity-50"
+                    isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40"
                   )}
                   onClick={isMultiSelect ? () => toggleSelect(skill.id) : undefined}
                 >
@@ -1515,6 +1193,24 @@ export function MySkills() {
                         >
                           {badge.label}
                         </span>
+                        {isMissingLocalSource && (
+                          <>
+                            <button
+                              onClick={() => handleRelinkSource(skill)}
+                              disabled={updatingSkillId === skill.id}
+                              className="rounded-full border border-border-subtle px-2 py-0.5 text-[12px] font-medium text-secondary transition-colors hover:bg-surface-hover disabled:opacity-50"
+                            >
+                              {t("mySkills.updateActions.relink")}
+                            </button>
+                            <button
+                              onClick={() => handleDetachSource(skill)}
+                              disabled={updatingSkillId === skill.id}
+                              className="rounded-full border border-border-subtle px-2 py-0.5 text-[12px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
+                            >
+                              {t("mySkills.updateActions.detachSource")}
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                     <div className="mt-2 flex flex-wrap items-center gap-1">
@@ -1577,18 +1273,6 @@ export function MySkills() {
                           <Plus className="h-3 w-3" />
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleAiTag(skill); }}
-                        disabled={aiTaggingSkillId === skill.id}
-                        className="inline-flex items-center gap-0.5 rounded-full bg-accent-bg/50 px-1.5 py-0.5 text-[11px] font-medium text-accent-light hover:bg-accent-bg transition-colors disabled:opacity-50"
-                        title={t("mySkills.aiTagging")}
-                      >
-                        {aiTaggingSkillId === skill.id ? (
-                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-2.5 w-2.5" />
-                        )}
-                      </button>
                     </div>
                   </div>
 
@@ -1608,20 +1292,6 @@ export function MySkills() {
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {isPromptEditorMode && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!enabledInScenario) handleToggleScenario(skill);
-                            promptEditorRef.current?.insertSkillAtCursor(skill.name);
-                          }}
-                          disabled={promptUsedSkillNames.has(skill.name)}
-                          className="rounded p-1 text-accent transition-colors hover:bg-accent-bg disabled:opacity-40"
-                          title={promptUsedSkillNames.has(skill.name) ? t("mySkills.promptEditor.used") : t("mySkills.promptEditor.button")}
-                        >
-                          <ArrowRight className="h-4 w-4" />
-                        </button>
-                      )}
                       <button
                         onClick={() => handleToggleScenario(skill)}
                         disabled={!activeScenario}
@@ -1650,8 +1320,7 @@ export function MySkills() {
                   "app-panel group flex items-center gap-3.5 rounded-xl border-transparent px-3.5 py-3 transition-all hover:border-border hover:bg-surface-hover",
                   enabledInScenario && "border-l-2 border-l-accent",
                   isMultiSelect && "cursor-pointer",
-                  isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40",
-                  isPromptEditorMode && promptUsedSkillNames.has(skill.name) && "opacity-50"
+                  isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40"
                 )}
                 onClick={isMultiSelect ? () => toggleSelect(skill.id) : undefined}
               >
@@ -1687,21 +1356,19 @@ export function MySkills() {
                       {tag}
                     </span>
                   ))}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleAiTag(skill); }}
-                    disabled={aiTaggingSkillId === skill.id}
-                    className="inline-flex items-center gap-0.5 rounded-full bg-accent-bg/50 px-1.5 py-0.5 text-[11px] font-medium text-accent-light hover:bg-accent-bg transition-colors disabled:opacity-50"
-                    title={t("mySkills.aiTagging")}
-                  >
-                    {aiTaggingSkillId === skill.id ? (
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-2.5 w-2.5" />
-                    )}
-                  </button>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2.5">
+                  {badge && (
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[12px] font-medium",
+                        badge.className
+                      )}
+                    >
+                      {badge.label}
+                    </span>
+                  )}
                   <span className="inline-flex items-center gap-1 text-[13px] text-muted">
                     {sourceIcon(skill.source_type)}
                     {sourceTypeLabel(skill)}
@@ -1714,19 +1381,23 @@ export function MySkills() {
                 </div>
 
                 <div className={cn("flex shrink-0 items-center gap-1 opacity-0 transition-opacity", !isMultiSelect && "group-hover:opacity-100")}>
-                  {isPromptEditorMode && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!enabledInScenario) handleToggleScenario(skill);
-                        promptEditorRef.current?.insertSkillAtCursor(skill.name);
-                      }}
-                      disabled={promptUsedSkillNames.has(skill.name)}
-                      className="rounded p-0.5 text-accent transition-colors hover:bg-accent-bg disabled:opacity-40"
-                      title={promptUsedSkillNames.has(skill.name) ? t("mySkills.promptEditor.used") : t("mySkills.promptEditor.button")}
-                    >
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
+                  {isMissingLocalSource && (
+                    <>
+                      <button
+                        onClick={() => handleRelinkSource(skill)}
+                        disabled={updatingSkillId === skill.id}
+                        className="rounded px-2 py-0.5 text-[13px] font-medium text-secondary transition-colors hover:bg-surface-hover disabled:opacity-50"
+                      >
+                        {t("mySkills.updateActions.relink")}
+                      </button>
+                      <button
+                        onClick={() => handleDetachSource(skill)}
+                        disabled={updatingSkillId === skill.id}
+                        className="rounded px-2 py-0.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
+                      >
+                        {t("mySkills.updateActions.detachSource")}
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => handleToggleScenario(skill)}
@@ -1773,19 +1444,6 @@ export function MySkills() {
           })}
         </div>
           </SortableContext>
-          </div>
-          {isPromptEditorMode && activeScenario && (
-            <div className="flex-1 min-w-0 max-h-[calc(100vh-220px)] overflow-y-auto scrollbar-hide pb-8">
-              <ScenarioPromptEditor
-                ref={promptEditorRef}
-                scenarioId={activeScenario.id}
-                scenarioName={activeScenario.name}
-                onExit={() => setIsPromptEditorMode(false)}
-                onTemplateChange={handlePromptTemplateChange}
-              />
-            </div>
-          )}
-          </div>
         </DndContext>
       )}
 
@@ -1818,84 +1476,6 @@ export function MySkills() {
         confirmLabel={t("mySkills.gitVersionRestore")}
         onClose={() => setRestoreVersionTag(null)}
         onConfirm={handleRestoreVersion}
-      />
-      <OnlineMatchDialog
-        open={onlineMatchTarget !== null}
-        skillName={onlineMatchTarget?.name ?? ""}
-        matches={onlineMatches}
-        loading={searchingOnline}
-        onClose={() => {
-          setOnlineMatchTarget(null);
-          setOnlineMatches([]);
-        }}
-        onSelect={handleSelectOnlineMatch}
-      />
-      <BatchOnlineMatchDialog
-        open={batchMatchDialogOpen}
-        items={batchMatchItems}
-        loading={batchSearching}
-        converting={batchConverting}
-        onClose={() => {
-          setBatchMatchDialogOpen(false);
-          setBatchMatchItems([]);
-        }}
-        onItemSelect={(skillId, match) => {
-          setBatchMatchItems((prev) =>
-            prev.map((item) =>
-              item.skill_id === skillId
-                ? { ...item, selectedMatch: match }
-                : item
-            )
-          );
-        }}
-        onAutoSelect={() => {
-          setBatchMatchItems((prev) =>
-            prev.map((item) => ({
-              ...item,
-              selectedMatch: item.matches[0],
-            }))
-          );
-        }}
-        onConvertAll={async () => {
-          const selections = batchMatchItems.filter((i) => i.selectedMatch);
-          if (selections.length === 0) return;
-          setBatchConverting(true);
-          try {
-            const items = selections.map((s) => ({
-              skill_id: s.skill_id,
-              online_source: s.selectedMatch!.source,
-              online_skill_id:
-                s.selectedMatch!.skill_id.split("/").pop() ??
-                s.selectedMatch!.name,
-              origin:
-                s.selectedMatch!.origin === "skillsmp"
-                  ? "skillssh"
-                  : s.selectedMatch!.origin,
-            }));
-            const result = await api.convertBatchImportToOnline(items);
-            if (result.succeeded.length > 0) {
-              toast.success(
-                t("mySkills.updateActions.batchConvertSuccess", {
-                  count: result.succeeded.length,
-                })
-              );
-            }
-            if (result.failed.length > 0) {
-              toast.error(
-                t("mySkills.updateActions.batchConvertPartialFail", {
-                  count: result.failed.length,
-                })
-              );
-            }
-            setBatchMatchDialogOpen(false);
-            setBatchMatchItems([]);
-            await refreshManagedSkills();
-          } catch (error: unknown) {
-            toast.error(getErrorMessage(error, t("common.error")));
-          } finally {
-            setBatchConverting(false);
-          }
-        }}
       />
     </div>
   );

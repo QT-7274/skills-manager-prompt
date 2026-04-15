@@ -11,8 +11,7 @@ import {
   Trash2,
   FolderOpen,
   GripVertical,
-  Sparkles,
-  Loader2,
+  Link2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -50,8 +49,6 @@ export function Sidebar() {
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; icon?: string | null } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteProjectTarget, setDeleteProjectTarget] = useState<{ id: string; name: string } | null>(null);
-  const [aiCreating, setAiCreating] = useState(false);
-  const [untaggedWarning, setUntaggedWarning] = useState(false);
   const [orderedScenarios, setOrderedScenarios] = useState(scenarios);
   const [orderedProjects, setOrderedProjects] = useState(projects);
   const scenarioReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -120,64 +117,6 @@ export function Sidebar() {
       navigate("/my-skills");
     }
     toast.success(t("scenario.created"));
-  };
-
-  const handleAiCreateScenario = async () => {
-    const apiKeyCheck = await api.getSettings("codebuddy_api_key");
-    if (!apiKeyCheck) {
-      toast.error(t("mySkills.aiTaggingNoApiKey"));
-      return;
-    }
-
-    // Check untagged ratio — warn if > 50%
-    const allSkills = await api.getManagedSkills();
-    const untaggedCount = allSkills.filter((s) => !s.tags || s.tags.length === 0).length;
-    if (allSkills.length > 0 && untaggedCount / allSkills.length > 0.5) {
-      setUntaggedWarning(true);
-      return;
-    }
-
-    await doAiCreateScenario();
-  };
-
-  const doAiCreateScenario = async () => {
-    setAiCreating(true);
-    try {
-      const skills = await api.getManagedSkills();
-      const skillList = skills.map((s) => ({
-        name: s.name,
-        description: s.description || "",
-        tags: s.tags || [],
-      }));
-      const result = await api.invokeCodebuddyAgent("create_scenario", {
-        skills: skillList,
-        existingScenarios: scenarios.map((s) => s.name),
-      });
-      if (result.scenarios && result.scenarios.length > 0) {
-        for (const suggestion of result.scenarios) {
-          const created = await api.createScenario(
-            suggestion.name,
-            suggestion.description,
-            suggestion.icon
-          );
-          for (const skillName of suggestion.skillNames) {
-            const matchedSkill = skills.find((s) => s.name === skillName);
-            if (matchedSkill) {
-              await api.addSkillToScenario(matchedSkill.id, created.id);
-            }
-          }
-        }
-        await Promise.all([refreshScenarios(), refreshManagedSkills()]);
-        toast.success(t("scenario.aiCreateScenarioSuccess"));
-      } else {
-        toast.info(t("scenario.aiCreateScenarioEmpty"));
-      }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t("scenario.aiCreateScenarioError");
-      toast.error(msg);
-    } finally {
-      setAiCreating(false);
-    }
   };
 
   const handleRenameScenario = async (newName: string, icon?: string) => {
@@ -274,8 +213,10 @@ export function Sidebar() {
 
         {/* Scenarios */}
         <div className="px-2.5 flex-1 overflow-y-auto scrollbar-hide min-h-0">
-          <div className="text-[13px] font-semibold text-muted mb-1.5 px-2.5 tracking-[0.1em] uppercase">
-            {t("sidebar.scenarios")}
+          <div className="mb-1.5 px-2.5">
+            <span className="block truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
+              {t("sidebar.scenarios")}
+            </span>
           </div>
           <DragDropContext onDragEnd={handleDragEnd}>
             <Droppable droppableId="scenarios">
@@ -303,7 +244,7 @@ export function Sidebar() {
                             <button
                               onClick={() => handleSwitchScenario(scenario.id)}
                               className={cn(
-                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm outline-none",
+                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-[15px] leading-5 outline-none",
                                 isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
                               )}
                             >
@@ -318,18 +259,20 @@ export function Sidebar() {
                                 <ScenarioIcon className="h-3 w-3" />
                               </span>
                               <span className="flex-1 truncate">{scenario.name}</span>
-                              {scenario.skill_count > 0 && (
-                                <span
-                                  className={cn(
-                                    "shrink-0 rounded-full px-1.5 text-[13px] font-medium leading-[18px] group-hover:hidden",
-                                    isActive
-                                      ? "bg-accent-bg text-accent-light"
-                                      : "bg-surface-hover text-muted"
-                                  )}
-                                >
-                                  {scenario.skill_count}
-                                </span>
-                              )}
+                              <span className="ml-auto flex h-[18px] w-[32px] shrink-0 items-center justify-end group-hover:hidden">
+                                {scenario.skill_count > 0 && (
+                                  <span
+                                    className={cn(
+                                      "min-w-[18px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
+                                      isActive
+                                        ? "bg-accent-bg text-accent-light"
+                                        : "bg-surface-hover text-muted"
+                                    )}
+                                  >
+                                    {scenario.skill_count}
+                                  </span>
+                                )}
+                              </span>
                             </button>
 
                             <div className={cn(
@@ -368,34 +311,22 @@ export function Sidebar() {
             </Droppable>
           </DragDropContext>
 
-          <div className="flex items-center gap-0.5 mt-0.5">
-            <button
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors flex-1 outline-none"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {t("sidebar.newScenario")}
-            </button>
-            <button
-              onClick={handleAiCreateScenario}
-              disabled={aiCreating}
-              className="rounded p-1 text-accent-light/70 hover:text-accent-light hover:bg-accent-bg/50 transition-colors disabled:opacity-50"
-              title={t("scenario.aiCreateScenario")}
-            >
-              {aiCreating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-2.5 py-[7px] mt-1 rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors w-full outline-none"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            {t("sidebar.newScenario")}
+          </button>
 
           {/* Divider */}
           <div className="mx-0.5 mt-3.5 mb-2.5 border-t border-border-subtle" />
 
           {/* Projects */}
-          <div className="text-[13px] font-semibold text-muted mb-1.5 px-2.5 tracking-[0.1em] uppercase">
-            {t("sidebar.projects")}
+          <div className="mb-1.5 px-2.5">
+            <span className="block truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
+              {t("sidebar.projects")}
+            </span>
           </div>
           <DragDropContext onDragEnd={handleProjectDragEnd}>
             <Droppable droppableId="projects">
@@ -422,7 +353,7 @@ export function Sidebar() {
                             <button
                               onClick={() => navigate(`/project/${project.id}`)}
                               className={cn(
-                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm outline-none",
+                                "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-[15px] leading-5 outline-none",
                                 isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
                               )}
                             >
@@ -430,28 +361,37 @@ export function Sidebar() {
                                 className={cn(
                                   "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded border",
                                   isActive
-                                    ? "border-blue-500/30 bg-blue-500/10 text-blue-500"
+                                    ? project.workspace_type === "linked"
+                                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                                      : "border-blue-500/30 bg-blue-500/10 text-blue-500"
                                     : "border-border bg-surface text-muted group-hover:border-border group-hover:text-tertiary"
                                 )}
                               >
-                                <FolderOpen className="h-3 w-3" />
+                                {project.workspace_type === "linked"
+                                  ? <Link2 className="h-3 w-3" />
+                                  : <FolderOpen className="h-3 w-3" />}
                               </span>
                               <span className="flex-1 truncate">{project.name}</span>
-                              {healthIndicator && (
-                                <span className={cn("shrink-0 h-1.5 w-1.5 rounded-full group-hover:hidden", healthIndicator.color)} title={healthIndicator.title} />
-                              )}
-                              {project.skill_count > 0 && (
-                                <span
-                                  className={cn(
-                                    "shrink-0 rounded-full px-1.5 text-[13px] font-medium leading-[18px] group-hover:hidden",
-                                    isActive
-                                      ? "bg-accent-bg text-accent-light"
-                                      : "bg-surface-hover text-muted"
-                                  )}
-                                >
-                                  {project.skill_count}
-                                </span>
-                              )}
+                              <span className="ml-auto flex h-[18px] w-[52px] shrink-0 items-center justify-end gap-2 group-hover:hidden">
+                                {healthIndicator && (
+                                  <span
+                                    className={cn("h-1.5 w-1.5 shrink-0 rounded-full", healthIndicator.color)}
+                                    title={healthIndicator.title}
+                                  />
+                                )}
+                                {project.skill_count > 0 && (
+                                  <span
+                                    className={cn(
+                                      "min-w-[24px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
+                                      isActive
+                                        ? "bg-accent-bg text-accent-light"
+                                        : "bg-surface-hover text-muted"
+                                    )}
+                                  >
+                                    {project.skill_count}
+                                  </span>
+                                )}
+                              </span>
                             </button>
 
                             <div className={cn(
@@ -489,7 +429,7 @@ export function Sidebar() {
 
           <button
             onClick={() => setShowAddProject(true)}
-            className="flex items-center gap-2 px-2.5 py-[7px] mt-0.5 rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors w-full outline-none"
+            className="flex items-center gap-2 px-2.5 py-[7px] mt-1 rounded-[5px] text-[13px] text-muted hover:text-secondary hover:bg-surface-hover transition-colors w-full outline-none"
           >
             <Plus className="w-3.5 h-3.5" />
             {t("sidebar.addProject")}
@@ -544,7 +484,7 @@ export function Sidebar() {
         onClose={() => setShowAddProject(false)}
         onAdded={async () => {
           await refreshProjects();
-          toast.success(t("project.added"));
+          toast.success(t("project.workspaceAdded"));
         }}
       />
 
@@ -553,23 +493,6 @@ export function Sidebar() {
         message={t("project.removeConfirm", { name: deleteProjectTarget?.name || "" })}
         onClose={() => setDeleteProjectTarget(null)}
         onConfirm={handleDeleteProject}
-      />
-
-      <ConfirmDialog
-        open={untaggedWarning}
-        tone="warning"
-        title={t("scenario.untaggedWarningTitle")}
-        message={t("scenario.untaggedWarningMessage")}
-        cancelLabel={t("scenario.goTagFirst")}
-        confirmLabel={t("scenario.continueAnyway")}
-        onClose={() => {
-          setUntaggedWarning(false);
-          navigate("/my-skills");
-        }}
-        onConfirm={async () => {
-          setUntaggedWarning(false);
-          await doAiCreateScenario();
-        }}
       />
     </>
   );
