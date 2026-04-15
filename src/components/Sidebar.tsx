@@ -394,7 +394,6 @@ export function Sidebar() {
               )}
             </button>
           </div>
->>>>>>> 72aa19f (style: refine sidebar typography and alignment)
 
           {/* Divider */}
           <div className="mx-0.5 mt-3.5 mb-2.5 border-t border-border-subtle" />
