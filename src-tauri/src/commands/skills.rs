@@ -1798,7 +1798,7 @@ fn convert_import_to_online_internal(
     let repo_url = format!("https://github.com/{}.git", online_source);
 
     let temp_dir = git_fetcher::clone_repo_ref(&repo_url, None, Some(cancel), proxy_url)
-        .map_err(AppError::git_or_cancelled)?;
+        .map_err(AppError::classify_git_error)?;
 
     emit_progress("installing");
     let update_result = (|| -> Result<(), AppError> {
