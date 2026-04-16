@@ -352,8 +352,12 @@ export function ProjectDetail() {
     setTogglingSkill(getSkillKey(skill));
     try {
       const nextEnabled = skill.enabledCount !== skill.totalCount;
+      const variantsToToggle = skill.variants.filter((variant) => variant.enabled !== nextEnabled);
+      if (variantsToToggle.length === 0) {
+        return;
+      }
       await Promise.all(
-        skill.variants.map((variant) =>
+        variantsToToggle.map((variant) =>
           api.toggleProjectSkill(id, variant.relative_path, variant.agent, nextEnabled)
         )
       );
@@ -471,15 +475,17 @@ export function ProjectDetail() {
     for (const skill of selectedSkillsList) {
       try {
         if (enabling && skill.enabledCount !== skill.totalCount) {
+          const variantsToEnable = skill.variants.filter((variant) => !variant.enabled);
           await Promise.all(
-            skill.variants.map((variant) =>
+            variantsToEnable.map((variant) =>
               api.toggleProjectSkill(id, variant.relative_path, variant.agent, true)
             )
           );
           count++;
         } else if (!enabling && skill.enabledCount > 0) {
+          const variantsToDisable = skill.variants.filter((variant) => variant.enabled);
           await Promise.all(
-            skill.variants.map((variant) =>
+            variantsToDisable.map((variant) =>
               api.toggleProjectSkill(id, variant.relative_path, variant.agent, false)
             )
           );
