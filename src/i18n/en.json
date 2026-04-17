@@ -15,27 +15,31 @@
   "help": {
     "eyebrow": "Guide",
     "title": "Quick Start for Skills Manager",
-    "description": "The core flow is: pick a scenario, install skills, and manage enablement and sync in My Skills; use Settings for environment-level configuration.",
+    "description": "The fastest path is: pick a scenario, install skills into the central library, decide what stays active in My Skills, then use Project Workspaces, Git backup, or Settings only when that workflow needs them.",
     "items": {
       "scenarios": {
-        "title": "A scenario is a curated skill setup",
-        "description": "Use separate scenarios for work, learning, or open source. Each scenario keeps its own enabled skills and agent toggles."
-      },
-      "switching": {
-        "title": "Switching scenarios also switches sync targets",
-        "description": "When you click a scenario, the app unsyncs the previous one and syncs the current scenario to detected agents."
+        "title": "Start by picking or creating a scenario",
+        "description": "Use separate scenarios for work, learning, or client projects. Each scenario keeps its own enabled skills, per-agent toggles, and skill order."
       },
       "install": {
-        "title": "Install from local, Git, or the market",
-        "description": "Installed skills are stored in the central library and can be added to the current scenario immediately."
+        "title": "Install skills into the central library",
+        "description": "Import from local folders, Git repositories, archives, or the marketplace. If you add a SkillsMP API key in Settings, marketplace search can also use AI."
       },
       "sync": {
-        "title": "Manage enablement and sync in My Skills",
-        "description": "Decide whether a skill belongs to the current scenario, then sync or unsync it for your agents."
+        "title": "Use My Skills to decide what is active",
+        "description": "Enable or remove skills for the current scenario, add tags, review docs and source details, check updates, open Version History, and sync or unsync them for detected agents."
+      },
+      "projects": {
+        "title": "Use Project Workspaces for repo-specific skills",
+        "description": "Link a project to inspect project-local skill folders (including nested directories), compare them with the central library, and import or export changes for the agents you care about. You can also link any directory as a standalone skills workspace for paths outside the default agent locations."
+      },
+      "backup": {
+        "title": "Use Git backup when you need history or multi-machine sync",
+        "description": "Save the remote URL in Settings, then run Start Backup or Sync to Git from My Skills. Each successful sync creates a snapshot tag that can be restored later from Version History."
       },
       "settings": {
-        "title": "Use Settings as the central config hub",
-        "description": "Review agent status, change theme/language, set the default scenario, configure close action and tray icon, save proxy and Git remote, and check for app updates."
+        "title": "Keep environment settings in one place",
+        "description": "Use Settings to review agent paths, add custom tools, change sync mode, theme, text size, language, default scenario, tray behavior, proxy, Git remote, AI search key, and app updates."
       }
     }
   },
@@ -174,6 +178,10 @@
       "noImportSkillsWithMatches": "No imported skills with online skills with online matches found",
       "autoSelectBest": "Auto-select Best",
       "selectFromMatches": "Select a matching version below",
+      "relink": "Relink",
+      "relinked": "Source path relinked",
+      "detachSource": "Keep local copy",
+      "detachedSource": "Source tracking removed",
       "alreadyUpToDate": "Skill content unchanged (version synced)"
     },
     "gitConfigEntry": "Sync Config",
@@ -394,6 +402,11 @@
     "agentNamePlaceholder": "My Agent",
     "agentKeyPlaceholder": "my_agent",
     "skillsPathPlaceholder": "/path/to/skills",
+    "projectSkillsPath": "Project Workspace Skills Path",
+    "projectSkillsPathPlaceholder": ".my-agent/skills",
+    "projectSkillsPathDesc": "Optional. Set a path relative to the project root to make this custom agent available in project workspaces.",
+    "projectSkillsPathValue": "Project path: {{path}}",
+    "projectAgentSupported": "Project workspace supported",
     "pathSaved": "Agent path updated",
     "pathReset": "Agent path reset to default",
     "defaultPathHint": "Using the default skills path",
@@ -433,7 +446,7 @@
     "language": "Language",
     "help": "Help",
     "about": "About",
-    "version": "Skills Manager 1.11.1",
+    "version": "Skills Manager 1.13.3",
     "tagline": "Cross-platform. Minimal, efficient, seamless multi-scenario switching.",
     "checkUpdate": "Check for Updates",
     "checking": "Checking…",
@@ -572,25 +585,34 @@
   "project": {
     "title": "Project Skills",
     "path": "Project Path",
-    "workspaceHint": "Manage the local .claude/skills copies in this repository and sync them with the Skills Center.",
+    "workspaceHint": "Manage local agent skills in this repository and sync them with the Skills Center.",
+    "linkedWorkspaceHint": "Manage skills in this linked external workspace without turning it into a global sync target.",
     "skills": "Skills",
     "noSkills": "No skills in this project",
-    "noSkillsHint": "Create a .claude/skills/ directory in the project and add skill folders.",
+    "noSkillsHint": "No agent skills directories found. Create a skills directory (e.g. .claude/skills/) and add skill folders.",
     "addManual": "Select Repository Directory",
     "scanDir": "Scan Directory",
     "scanDirPlaceholder": "Enter root directory to scan, e.g. ~/Work",
     "scanResult": "Found {{count}} projects",
-    "scanNoResult": "No projects with .claude/skills/ found",
+    "scanNoResult": "No projects with agent skills directories found",
     "scanning": "Scanning...",
     "removeConfirm": "Remove project \"{{name}}\" from the list? Project files will not be deleted.",
     "added": "Project added",
+    "workspaceAdded": "Workspace added",
     "removed": "Project removed",
     "notFound": "Project not found",
     "alreadyExists": "Already exists",
-    "invalidDir": "Directory does not contain .claude/skills/",
+    "invalidDir": "Directory does not contain any agent skills",
     "addProjectTitle": "Link Project Workspace",
     "tabManual": "Manual",
     "tabScan": "Scan",
+    "tabLinked": "Linked Workspace",
+    "addLinkedHint": "Link an external skills root. It will be managed as a workspace only and will not participate in global scenario sync.",
+    "linkedNamePlaceholder": "Workspace name",
+    "linkedPathPlaceholder": "Skills directory path",
+    "linkedDisabledPathHint": "A sibling directory with the \"-disabled\" suffix will be created automatically for disabled skills.",
+    "selectSkillsDir": "Select skills directory",
+    "addLinkedWorkspace": "Link Workspace",
     "addSelected": "Add Selected ({{count}})",
     "selectAll": "Select All",
     "deselectAll": "Deselect All",
@@ -602,7 +624,7 @@
     "updateCenter": "Update Center",
     "updateProject": "Update Project",
     "importToCenterSuccess": "\"{{name}}\" updated to Skills Center",
-    "importFromCenterSuccess": "\"{{name}}\" added to project",
+    "importFromCenterSuccess": "\"{{name}}\" added to {{count}} project agents",
     "updateCenterSuccess": "\"{{name}}\" updated to Skills Center",
     "updateProjectSuccess": "\"{{name}}\" updated to project",
     "resetFromCenter": "Restore center version",
@@ -630,6 +652,16 @@
     },
     "selectSkillToExport": "Select a skill to add to this project",
     "searchCenterSkills": "Search skills in the central library...",
+    "targetAgent": "Target agent",
+    "targetAgents": "Target agents",
+    "selectTargetAgents": "Select at least one target agent",
+    "agentPickerHint": "Enabled agents are shown first; others stay collapsed",
+    "saveDefaultAgents": "Save as default",
+    "defaultAgentsSaved": "Default agent selection saved",
+    "selectedAgentCount": "{{count}} agents selected",
+    "enabledAgents": "Enabled agents",
+    "moreAgents": "More agents ({{count}})",
+    "customAssignment": "{{assigned}} / {{total}} agents",
     "noSkillsToExport": "No skills available to add to this project",
     "import": "Add",
     "updateSelected": "Add {{count}}",

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// Current schema version. Bump this when adding a new migration.
-const LATEST_VERSION: u32 = 5;
+const LATEST_VERSION: u32 = 6;
 
 /// Run all pending migrations on the database.
 ///
@@ -52,6 +52,7 @@ fn migrate_step(conn: &Connection, from_version: u32) -> Result<()> {
         2 => migrate_v2_to_v3(conn),
         3 => migrate_v3_to_v4(conn),
         4 => migrate_v4_to_v5(conn),
+        5 => migrate_v5_to_v6(conn),
         _ => bail!("unknown migration version: {from_version}"),
     }
 }
@@ -156,6 +157,10 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             path TEXT NOT NULL UNIQUE,
+            workspace_type TEXT NOT NULL DEFAULT 'project',
+            linked_agent_key TEXT,
+            linked_agent_name TEXT,
+            disabled_path TEXT,
             sort_order INTEGER DEFAULT 0,
             created_at INTEGER,
             updated_at INTEGER
@@ -238,6 +243,36 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
         );
         ",
     )?;
+    Ok(())
+}
+
+/// v5 → v6: Expand projects into generic workspace records (linked workspaces).
+fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            workspace_type TEXT NOT NULL DEFAULT 'project',
+            linked_agent_key TEXT,
+            linked_agent_name TEXT,
+            disabled_path TEXT,
+            sort_order INTEGER DEFAULT 0,
+            created_at INTEGER,
+            updated_at INTEGER
+        );
+        ",
+    )?;
+    add_column_if_missing(
+        conn,
+        "projects",
+        "workspace_type",
+        "TEXT NOT NULL DEFAULT 'project'",
+    )?;
+    add_column_if_missing(conn, "projects", "linked_agent_key", "TEXT")?;
+    add_column_if_missing(conn, "projects", "linked_agent_name", "TEXT")?;
+    add_column_if_missing(conn, "projects", "disabled_path", "TEXT")?;
     Ok(())
 }
 
