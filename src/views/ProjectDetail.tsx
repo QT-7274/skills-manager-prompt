@@ -31,6 +31,7 @@ import { DetailSheet } from "../components/DetailSheet";
 import { AgentToggleSection, type AgentToggleItem } from "../components/AgentToggleSection";
 import { ProjectAgentDots } from "../components/ProjectAgentDots";
 import { SkillMarkdown } from "../components/SkillMarkdown";
+import { DocumentDiffViewer } from "../components/DocumentDiffViewer";
 import { getTagActiveColor, getTagColor } from "../lib/skillTags";
 import { cn } from "../utils";
 import * as api from "../lib/tauri";
@@ -139,6 +140,8 @@ export function ProjectDetail() {
   const [detailSkill, setDetailSkill] = useState<ProjectSkillGroup | null>(null);
   const [docContent, setDocContent] = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(false);
+  const [centerDocContent, setCenterDocContent] = useState<string | null>(null);
+  const [centerDocLoading, setCenterDocLoading] = useState(false);
   const [updatingCenterSkill, setUpdatingCenterSkill] = useState<string | null>(null);
   const [updatingProjectSkill, setUpdatingProjectSkill] = useState<string | null>(null);
   const [batchUpdatingCenter, setBatchUpdatingCenter] = useState(false);
@@ -356,7 +359,20 @@ export function ProjectDetail() {
     setDetailSkill(skill);
     setDocContent(null);
     setDocLoading(true);
+    setCenterDocContent(null);
+    setCenterDocLoading(false);
     if (!project || !id) return;
+
+    const centerSkillId = skill.centerSkillIds.length > 0 ? skill.centerSkillIds[0] : null;
+
+    if (centerSkillId) {
+      setCenterDocLoading(true);
+      api.getSkillDocument(centerSkillId)
+        .then((doc) => setCenterDocContent(doc.content))
+        .catch(() => setCenterDocContent(null))
+        .finally(() => setCenterDocLoading(false));
+    }
+
     try {
       const doc = await api.getProjectSkillDocument(
         id,
@@ -1190,6 +1206,8 @@ export function ProjectDetail() {
           onToggleAgent={(agentKey, enabled) => handleToggleDetailAgent(detailSkill, agentKey, enabled)}
           docContent={docContent}
           docLoading={docLoading}
+          centerDocContent={centerDocContent}
+          centerDocLoading={centerDocLoading}
           onClose={() => setDetailSkill(null)}
         />
       )}
@@ -1246,6 +1264,8 @@ function ProjectSkillDetailPanel({
   onToggleAgent,
   docContent,
   docLoading,
+  centerDocContent,
+  centerDocLoading,
   onClose,
 }: {
   skill: ProjectSkillGroup;
@@ -1254,9 +1274,13 @@ function ProjectSkillDetailPanel({
   onToggleAgent: (agentKey: string, enabled: boolean) => void;
   docContent: string | null;
   docLoading: boolean;
+  centerDocContent: string | null;
+  centerDocLoading: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [contentTab, setContentTab] = useState<"local" | "diff" | "center">("local");
+  const supportsCenterDiff = skill.centerSkillIds.length > 0;
   const toggleItems: AgentToggleItem[] = targets.map((target) => {
     const variant = skill.variants.find((item) => item.agent === target.key);
     return {
@@ -1330,8 +1354,50 @@ function ProjectSkillDetailPanel({
         onToggle={onToggleAgent}
         className="mb-4"
       />
+
+      {supportsCenterDiff && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {(["local", "diff", "center"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setContentTab(tab)}
+              className={cn(
+                "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
+                contentTab === tab
+                  ? "bg-accent text-white"
+                  : "bg-surface-hover text-muted hover:text-secondary"
+              )}
+              disabled={(tab === "diff" || tab === "center") && centerDocLoading}
+            >
+              {tab === "local"
+                ? t("mySkills.docTabs.local")
+                : tab === "diff"
+                  ? t("mySkills.docTabs.diff")
+                  : t("project.docTabs.center")}
+            </button>
+          ))}
+        </div>
+      )}
+
       {docLoading ? (
         <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
+      ) : contentTab === "diff" ? (
+        docContent && centerDocContent ? (
+          <DocumentDiffViewer original={docContent} updated={centerDocContent} />
+        ) : centerDocLoading ? (
+          <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
+        ) : (
+          <div className="mt-12 text-center text-[13px] text-muted">{t("mySkills.sourceDiffUnavailable")}</div>
+        )
+      ) : contentTab === "center" ? (
+        centerDocLoading ? (
+          <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
+        ) : centerDocContent ? (
+          <SkillMarkdown content={centerDocContent} />
+        ) : (
+          <div className="mt-12 text-center text-[13px] text-muted">{t("mySkills.sourceDiffUnavailable")}</div>
+        )
       ) : docContent ? (
         <SkillMarkdown content={docContent} />
       ) : (
