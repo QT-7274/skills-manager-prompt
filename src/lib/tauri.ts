@@ -358,6 +358,12 @@ export const setSettings = (key: string, value: string) =>
 export const getCentralRepoPath = () =>
   invoke<string>("get_central_repo_path");
 
+export const getCentralRepoPathOverride = () =>
+  invoke<string | null>("get_central_repo_path_override");
+
+export const setCentralRepoPath = (path?: string | null) =>
+  invoke<string>("set_central_repo_path", { path: path ?? null });
+
 export const appExit = () => invoke<void>("app_exit");
 
 export const hideToTray = () => invoke<void>("hide_to_tray");

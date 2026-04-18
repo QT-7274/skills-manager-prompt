@@ -34,7 +34,7 @@
 
 ## Features
 
-- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo at `~/.skills-manager`.
+- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skills-manager` and can be customized in **Settings**.
 - **Marketplace + AI search** — Browse popular skills from the marketplace, run keyword search, or enable SkillsMP AI search with your API key.
 - **Multi-tool sync** — Sync skills to any supported tool via symlink or copy with a single click.
 - **Project Workspaces** — View and manage project-local skill folders for supported agents, compare them with your central library, and sync changes in either direction. Supports nested skill directories and per-agent assignment when exporting.
@@ -59,7 +59,7 @@
 
 ## Git Backup
 
-Back up `~/.skills-manager/skills/` to a Git repo for version history and multi-machine sync.
+Back up the `skills/` folder inside your current central repository to a Git repo for version history and multi-machine sync. By default this is `~/.skills-manager/skills/`.
 
 ### Quick setup
 
@@ -79,7 +79,7 @@ Each successful sync creates a snapshot version tag. You can open **Version Hist
 - SSH URL (`git@github.com:...`): requires SSH key configured on your machine and added to GitHub.
 - HTTPS URL (`https://github.com/...`): push usually requires a Personal Access Token (PAT).
 
-> **Note:** The SQLite database (`~/.skills-manager/skills-manager.db`) is not included in Git — it stores metadata that can be rebuilt by scanning the skill files.
+> **Note:** The SQLite database (`skills-manager.db` inside your current central repository, `~/.skills-manager/skills-manager.db` by default) is not included in Git — it stores metadata that can be rebuilt by scanning the skill files.
 
 ## Supported Tools
 

@@ -68,6 +68,21 @@ pub fn get_central_repo_path() -> String {
 }
 
 #[tauri::command]
+pub fn get_central_repo_path_override() -> Option<String> {
+    central_repo::configured_base_dir().map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn set_central_repo_path(path: Option<String>) -> Result<String, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        central_repo::set_base_dir_override(path)
+            .map(|resolved| resolved.to_string_lossy().to_string())
+            .map_err(AppError::io)
+    })
+    .await?
+}
+
+#[tauri::command]
 pub async fn open_central_repo_folder() -> Result<(), AppError> {
     tauri::async_runtime::spawn_blocking(|| {
         let repo_path = central_repo::base_dir();
