@@ -4,8 +4,29 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::core::{
-    central_repo, error::AppError, installer, scanner, skill_store::SkillStore, tool_adapters,
+    error::AppError, installer, scanner, skill_store::SkillStore, tool_adapters,
 };
+
+fn match_imported_skill_id(
+    rec: &crate::core::skill_store::DiscoveredSkillRecord,
+    managed_skills: &[crate::core::skill_store::SkillRecord],
+) -> Option<String> {
+    if let Some(fingerprint) = rec.fingerprint.as_deref() {
+        if let Some(existing) = managed_skills
+            .iter()
+            .find(|skill| skill.content_hash.as_deref() == Some(fingerprint))
+        {
+            return Some(existing.id.clone());
+        }
+    }
+
+    rec.name_guess.as_deref().and_then(|name| {
+        managed_skills
+            .iter()
+            .find(|skill| skill.name == name)
+            .map(|skill| skill.id.clone())
+    })
+}
 
 #[derive(Debug, Serialize)]
 pub struct ScanResultDto {
@@ -30,11 +51,7 @@ pub async fn scan_local_skills(
             .map_err(AppError::io)?;
 
         for rec in &mut plan.discovered {
-            if let Some(name) = rec.name_guess.as_deref() {
-                if let Some(existing) = managed_skills.iter().find(|skill| skill.name == name) {
-                    rec.imported_skill_id = Some(existing.id.clone());
-                }
-            }
+            rec.imported_skill_id = match_imported_skill_id(rec, &managed_skills);
         }
 
         // Clear and repopulate discovered
@@ -66,10 +83,12 @@ pub async fn import_existing_skill(
         let path = PathBuf::from(&source_path);
         let resolved_name =
             installer::resolve_local_skill_name(&path, name.as_deref()).map_err(AppError::io)?;
-        let central_path = central_repo::skills_dir().join(&resolved_name);
+
+        let result =
+            installer::install_from_local(&path, Some(&resolved_name)).map_err(AppError::io)?;
 
         if let Some(existing) = store
-            .get_skill_by_central_path(&central_path.to_string_lossy())
+            .get_skill_by_central_path(&result.central_path.to_string_lossy())
             .map_err(AppError::db)?
         {
             if let Ok(Some(scenario_id)) = store.get_active_scenario_id() {
@@ -79,13 +98,6 @@ pub async fn import_existing_skill(
             }
             return Ok(());
         }
-
-        let result = installer::install_from_local_to_destination(
-            &path,
-            Some(&resolved_name),
-            &central_path,
-        )
-        .map_err(AppError::io)?;
 
         let now = chrono::Utc::now().timestamp_millis();
         let id = uuid::Uuid::new_v4().to_string();
@@ -141,22 +153,17 @@ pub async fn import_all_discovered(store: State<'_, Arc<SkillStore>>) -> Result<
             }
             if let Some(first) = group.locations.first() {
                 let path = PathBuf::from(&first.found_path);
-                let central_path = central_repo::skills_dir().join(&group.name);
 
-                if let Ok(Some(existing)) =
-                    store.get_skill_by_central_path(&central_path.to_string_lossy())
-                {
-                    if let Some(ref scenario_id) = active_scenario {
-                        store.add_skill_to_scenario(scenario_id, &existing.id).ok();
+                if let Ok(result) = installer::install_from_local(&path, Some(&group.name)) {
+                    if let Ok(Some(existing)) =
+                        store.get_skill_by_central_path(&result.central_path.to_string_lossy())
+                    {
+                        if let Some(ref scenario_id) = active_scenario {
+                            store.add_skill_to_scenario(scenario_id, &existing.id).ok();
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                if let Ok(result) = installer::install_from_local_to_destination(
-                    &path,
-                    Some(&group.name),
-                    &central_path,
-                ) {
                     let now = chrono::Utc::now().timestamp_millis();
                     let id = uuid::Uuid::new_v4().to_string();
                     let record = crate::core::skill_store::SkillRecord {

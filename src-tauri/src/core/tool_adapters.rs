@@ -74,6 +74,17 @@ impl ToolAdapter {
     /// Returns all directories to scan for skills: the primary skills_dir plus any additional scan dirs.
     pub fn all_scan_dirs(&self) -> Vec<PathBuf> {
         let mut dirs = vec![self.skills_dir()];
+        for c in self.additional_existing_scan_dirs() {
+            if !dirs.contains(&c) {
+                dirs.push(c);
+            }
+        }
+        dirs
+    }
+
+    /// Returns the existing additional discovery roots for this adapter.
+    pub fn additional_existing_scan_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
         for rel in &self.additional_scan_dirs {
             let candidates = Self::candidate_paths(rel);
             for c in candidates {

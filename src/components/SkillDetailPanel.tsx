@@ -40,34 +40,72 @@ export function SkillDetailPanel({
   togglingTool,
   onToggleTool,
 }: Props) {
+  if (!skill) return null;
+
+  const panelKey = [
+    skill.id,
+    skill.updated_at,
+    skill.source_type,
+    skill.source_ref ?? "",
+    skill.source_revision ?? "",
+    skill.remote_revision ?? "",
+  ].join(":");
+
+  return createPortal(
+    <SkillDetailPanelContent
+      key={panelKey}
+      skill={skill}
+      onClose={onClose}
+      toolToggles={toolToggles}
+      togglingTool={togglingTool}
+      onToggleTool={onToggleTool}
+    />,
+    document.body
+  );
+}
+
+function SkillDetailPanelContent({
+  skill,
+  onClose,
+  toolToggles,
+  togglingTool,
+  onToggleTool,
+}: {
+  skill: ManagedSkill;
+  onClose: () => void;
+  toolToggles?: SkillToolToggle[] | null;
+  togglingTool?: string | null;
+  onToggleTool?: (tool: string, enabled: boolean) => void;
+}) {
   const { t } = useTranslation();
   const [doc, setDoc] = useState<SkillDocument | null>(null);
   const [sourceDoc, setSourceDoc] = useState<SourceSkillDocument | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [sourceLoading, setSourceLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [isMetadataExpanded, setIsMetadataExpanded] = useState(false);
   const [isAgentSectionExpanded, setIsAgentSectionExpanded] = useState(false);
   const [contentTab, setContentTab] = useState<"local" | "diff" | "source">("local");
   const localRequestIdRef = useRef(0);
   const sourceRequestIdRef = useRef(0);
-  const skillId = skill?.id ?? null;
+  const skillId = skill.id;
   const supportsSourceDiff =
-    skill?.source_type === "git"
-    || skill?.source_type === "skillssh"
-    || ((skill?.source_type === "local" || skill?.source_type === "import") && !!skill?.source_ref);
+    skill.source_type === "git"
+    || skill.source_type === "skillssh"
+    || ((skill.source_type === "local" || skill.source_type === "import") && !!skill.source_ref);
+  const [sourceLoading, setSourceLoading] = useState(supportsSourceDiff);
+  const localDocVersion = `${skill.id}:${skill.updated_at}`;
+  const sourceDocVersion = [
+    skill.id,
+    skill.source_type,
+    skill.source_ref ?? "",
+    skill.source_ref_resolved ?? "",
+    skill.source_revision ?? "",
+    skill.remote_revision ?? "",
+  ].join(":");
 
   useEffect(() => {
-    if (!skillId) {
-      setDoc(null);
-      setLoading(false);
-      return;
-    }
     localRequestIdRef.current += 1;
     const requestId = localRequestIdRef.current;
 
-    // Loading state is intentionally toggled when input skill changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
     getSkillDocument(skillId)
       .then((nextDoc) => {
         if (requestId === localRequestIdRef.current) {
@@ -84,19 +122,16 @@ export function SkillDetailPanel({
           setLoading(false);
         }
       });
-  }, [skillId]);
+  }, [skillId, localDocVersion]);
 
   useEffect(() => {
-    if (!skillId || !supportsSourceDiff) {
-      setSourceDoc(null);
-      setSourceLoading(false);
+    if (!supportsSourceDiff) {
       return;
     }
 
     sourceRequestIdRef.current += 1;
     const requestId = sourceRequestIdRef.current;
 
-    setSourceLoading(true);
     getSourceSkillDocument(skillId)
       .then((nextDoc) => {
         if (requestId === sourceRequestIdRef.current) {
@@ -113,17 +148,7 @@ export function SkillDetailPanel({
           setSourceLoading(false);
         }
       });
-  }, [skillId, supportsSourceDiff]);
-
-  useEffect(() => {
-    setIsMetadataExpanded(false);
-  }, [skillId]);
-
-  useEffect(() => {
-    setContentTab("local");
-  }, [skillId]);
-
-  if (!skill) return null;
+  }, [skillId, supportsSourceDiff, sourceDocVersion]);
 
   const sourceIcon = (type: string) => {
     switch (type) {
@@ -157,7 +182,7 @@ export function SkillDetailPanel({
     toolToggles?.filter((item) => item.installed && item.globally_enabled && item.enabled).length ?? 0;
   const unavailableToggleCount = (toolToggles?.length ?? 0) - availableToggleCount;
 
-  return createPortal(
+  return (
     <div className="fixed top-[28px] right-0 bottom-0 left-[220px] z-40 flex">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative h-full w-full overflow-y-auto border-l border-border-subtle bg-bg-secondary shadow-2xl animate-in slide-in-from-right duration-200">
@@ -385,7 +410,6 @@ export function SkillDetailPanel({
           )}
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }
