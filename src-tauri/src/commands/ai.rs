@@ -70,6 +70,11 @@ pub async fn invoke_codebuddy_agent(
     if let Some(ref env) = internet_env {
         input["internetEnvironment"] = serde_json::json!(env);
     }
+    if let Ok(codebuddy_path) = std::env::var("CODEBUDDY_CODE_PATH") {
+        if !codebuddy_path.trim().is_empty() {
+            input["codebuddyCodePath"] = serde_json::json!(codebuddy_path);
+        }
+    }
     let input_str = serde_json::to_string(&input)
         .map_err(|e| AppError::internal(format!("Failed to serialize input: {e}")))?;
 
@@ -113,10 +118,19 @@ pub async fn invoke_codebuddy_agent(
             stdout,
         );
         let details = if stderr.trim().is_empty() { &stdout } else { &stderr };
+        let details_preview = details.chars().take(1000).collect::<String>();
+        let normalized = details_preview.to_lowercase();
+        let friendly = if normalized.contains("@tencent-ai/agent-sdk") {
+            "AI bridge dependency is missing: @tencent-ai/agent-sdk"
+        } else if normalized.contains("codebuddy cli is required") {
+            "CodeBuddy CLI is required by the Agent SDK but was not found in PATH. Install CodeBuddy Code or set CODEBUDDY_CODE_PATH."
+        } else {
+            &details_preview
+        };
         return Err(AppError::internal(format!(
             "Bridge script failed (exit {}): {}",
             output.status.code().unwrap_or(-1),
-            details.chars().take(1000).collect::<String>()
+            friendly
         )));
     }
 

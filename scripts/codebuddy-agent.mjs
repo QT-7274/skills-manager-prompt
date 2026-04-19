@@ -1,4 +1,5 @@
-import { query } from "@tencent-ai/agent-sdk";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 
 const TAG_RULES = `Tag language rules:
 - Use Chinese for general concepts (e.g. "前端", "状态管理", "代码审查", "测试")
@@ -193,7 +194,7 @@ async function main() {
     process.exit(1);
   }
 
-  const { task, apiKey, payload, internetEnvironment } = input;
+  const { task, apiKey, payload, internetEnvironment, codebuddyCodePath } = input;
 
   if (!PROMPTS[task]) {
     console.log(JSON.stringify({ ok: false, error: `Unknown task: ${task}` }));
@@ -205,8 +206,34 @@ async function main() {
   const fullPrompt = `${systemPrompt}\n\n${userContent}`;
 
   try {
+    let query;
+    try {
+      ({ query } = await import("@tencent-ai/agent-sdk"));
+    } catch (err) {
+      throw new Error(
+        `Missing @tencent-ai/agent-sdk dependency. Run npm install to restore app dependencies. ${err.message || String(err)}`
+      );
+    }
+
     const envVars = { CODEBUDDY_API_KEY: apiKey };
     if (internetEnvironment) envVars.CODEBUDDY_INTERNET_ENVIRONMENT = internetEnvironment;
+    if (codebuddyCodePath) {
+      try {
+        fs.accessSync(codebuddyCodePath, fs.constants.X_OK);
+      } catch {
+        throw new Error(`Configured CodeBuddy CLI path is not executable: ${codebuddyCodePath}`);
+      }
+      envVars.CODEBUDDY_CODE_PATH = codebuddyCodePath;
+    } else {
+      const probe = spawnSync("codebuddy", ["--version"], {
+        stdio: "ignore",
+      });
+      if (probe.error || probe.status !== 0) {
+        throw new Error(
+          "CodeBuddy CLI is required by the Agent SDK but was not found in PATH. Install CodeBuddy Code or set CODEBUDDY_CODE_PATH."
+        );
+      }
+    }
 
     const maxTurns = (task === "batch_tag_skills" || task === "consolidate_tags" || task === "create_scenario") ? 3 : 1;
 
@@ -214,7 +241,7 @@ async function main() {
     const q = query({
       prompt: fullPrompt,
       options: {
-        permissionMode: "bypassPermissions",
+        permissionMode: "plan",
         maxTurns,
         env: envVars,
       },
