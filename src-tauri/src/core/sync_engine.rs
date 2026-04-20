@@ -71,7 +71,17 @@ pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMo
                 })?;
                 Ok(SyncMode::Symlink)
             }
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            {
+                match std::os::windows::fs::symlink_dir(source, target) {
+                    Ok(()) => Ok(SyncMode::Symlink),
+                    Err(_) => {
+                        copy_dir_recursive(source, target)?;
+                        Ok(SyncMode::Copy)
+                    }
+                }
+            }
+            #[cfg(all(not(unix), not(windows)))]
             {
                 copy_dir_recursive(source, target)?;
                 Ok(SyncMode::Copy)
@@ -199,9 +209,9 @@ mod tests {
         assert!(tgt.is_symlink());
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     #[test]
-    fn sync_skill_symlink_falls_back_to_copy_on_windows() {
+    fn sync_skill_symlink_creates_symlink_on_windows() {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("source");
         let tgt = tmp.path().join("target");
@@ -209,9 +219,8 @@ mod tests {
         fs::write(src.join("SKILL.md"), "# hello").unwrap();
 
         let mode = sync_skill(&src, &tgt, SyncMode::Symlink).unwrap();
-        assert!(matches!(mode, SyncMode::Copy));
-        assert!(tgt.join("SKILL.md").exists());
-        assert_eq!(fs::read_to_string(tgt.join("SKILL.md")).unwrap(), "# hello");
+        assert!(matches!(mode, SyncMode::Symlink));
+        assert!(tgt.is_symlink());
     }
 
     #[test]
