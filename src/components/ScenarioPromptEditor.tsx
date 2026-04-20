@@ -36,25 +36,54 @@ function normalizedSkillSet(skillNames: string[]) {
 
 function describeCoverageMismatch(enabledSkills: string[], recipes: GeneratedRecipeDraft[]) {
   const enabled = normalizedSkillSet(enabledSkills);
-  const used = new Set<string>();
+  const usageCounts = new Map<string, number>();
+  const invalidRecipeIndexes: number[] = [];
+  const invalidTemplateIndexes: number[] = [];
+  const extra = new Set<string>();
 
-  for (const recipe of recipes) {
-    for (const skillName of recipe.skillNames) {
-      used.add(skillName.trim());
+  for (const [index, recipe] of recipes.entries()) {
+    const recipeSkills = [...normalizedSkillSet(recipe.skillNames)];
+    const templateSkills = [...extractUsedSkillNames(recipe.prompt_template)].map((name) => name.trim()).filter(Boolean);
+
+    if (recipeSkills.length !== 1) {
+      invalidRecipeIndexes.push(index + 1);
+      continue;
     }
+
+    if (templateSkills.length !== 1 || templateSkills[0] !== recipeSkills[0]) {
+      invalidTemplateIndexes.push(index + 1);
+    }
+
+    const skillName = recipeSkills[0];
+    if (!enabled.has(skillName)) {
+      extra.add(skillName);
+      continue;
+    }
+
+    usageCounts.set(skillName, (usageCounts.get(skillName) ?? 0) + 1);
   }
 
-  const missing = enabledSkills.filter((skillName) => !used.has(skillName));
-  const extra = [...used].filter((skillName) => !enabled.has(skillName));
+  const missing = enabledSkills.filter((skillName) => !usageCounts.has(skillName));
+  const duplicates = enabledSkills.filter((skillName) => (usageCounts.get(skillName) ?? 0) > 1);
 
-  return { missing, extra };
+  return {
+    wrongCount: recipes.length !== enabledSkills.length,
+    expectedCount: enabledSkills.length,
+    actualCount: recipes.length,
+    missing,
+    extra: [...extra],
+    duplicates,
+    invalidRecipeIndexes,
+    invalidTemplateIndexes,
+  };
 }
 
 function isRecipeCoverageValid(enabledSkills: string[], recipes: GeneratedRecipeDraft[]) {
   if (recipes.length === 0) return false;
+  if (recipes.length !== enabledSkills.length) return false;
 
   const enabled = normalizedSkillSet(enabledSkills);
-  const used = new Set<string>();
+  const usageCounts = new Map<string, number>();
 
   for (const recipe of recipes) {
     const recipeSkills = normalizedSkillSet(recipe.skillNames);
@@ -68,7 +97,7 @@ function isRecipeCoverageValid(enabledSkills: string[], recipes: GeneratedRecipe
       if (!enabled.has(skillName) || !templateSkills.has(skillName)) {
         return false;
       }
-      used.add(skillName);
+      usageCounts.set(skillName, (usageCounts.get(skillName) ?? 0) + 1);
     }
 
     for (const skillName of templateSkills) {
@@ -78,7 +107,11 @@ function isRecipeCoverageValid(enabledSkills: string[], recipes: GeneratedRecipe
     }
   }
 
-  return used.size === enabled.size;
+  if (usageCounts.size !== enabled.size) {
+    return false;
+  }
+
+  return enabledSkills.every((skillName) => usageCounts.get(skillName) === 1);
 }
 
 /** Render template to plain text for clipboard export. */
@@ -229,15 +262,20 @@ export const ScenarioPromptEditor = forwardRef<
         outputLanguage: i18n.language,
       });
       if (!isRecipeCoverageValid(enabledSkillNames, result.recipes ?? [])) {
-        const { missing, extra } = describeCoverageMismatch(enabledSkillNames, result.recipes ?? []);
+        const mismatch = describeCoverageMismatch(enabledSkillNames, result.recipes ?? []);
         result = await api.invokeCodebuddyAgent("generate_scenario_prompt", {
           scenarioName,
           skills: skillList,
           outputLanguage: i18n.language,
-          retryFeedback: `Your previous recipes did not satisfy the exact recipe coverage and single-skill rule.
-- Missing skills: ${missing.length > 0 ? missing.join(", ") : "none"}
-- Extra skills: ${extra.length > 0 ? extra.join(", ") : "none"}
-- Fix the recipes so each recipe uses exactly one skill, and the union of all recipe.skillNames exactly equals the enabled skills list.`,
+          retryFeedback: `Your previous recipes did not satisfy the exact one-recipe-per-skill rule.
+- Expected recipe count: ${mismatch.expectedCount}
+- Actual recipe count: ${mismatch.actualCount}
+- Missing skills: ${mismatch.missing.length > 0 ? mismatch.missing.join(", ") : "none"}
+- Duplicate skills: ${mismatch.duplicates.length > 0 ? mismatch.duplicates.join(", ") : "none"}
+- Extra skills: ${mismatch.extra.length > 0 ? mismatch.extra.join(", ") : "none"}
+- Recipes with invalid skillNames count: ${mismatch.invalidRecipeIndexes.length > 0 ? mismatch.invalidRecipeIndexes.join(", ") : "none"}
+- Recipes with invalid prompt_template skill usage: ${mismatch.invalidTemplateIndexes.length > 0 ? mismatch.invalidTemplateIndexes.join(", ") : "none"}
+- Fix the result so the number of recipes exactly equals the number of enabled skills, each recipe uses exactly one enabled skill, each enabled skill appears in exactly one recipe, and each prompt_template references that same single skill.`,
         });
       }
       if (!result.prompt) {

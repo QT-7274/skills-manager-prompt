@@ -20,16 +20,17 @@ Tags should describe the skill's purpose, applicable tools, or technical domain.
 
   generate_scenario_prompt: `You are an AI coding assistant. Given the scenario name and enabled skills below, generate a JSON object with two fields:
 - "prompt": a default prompt under 180 characters. It must start with skill names in [skill::name] format separated by commas, followed by a natural lead-in that invites the user to describe their task.
-- "recipes": an array of 2-4 recipe objects, each with "name" (short, 2-4 words), "skillNames" (array of enabled skill names used by that recipe), and "prompt_template" (same [skill::name] format as prompt, under 180 characters).
+- "recipes": an array containing exactly one recipe per enabled skill. Each recipe object must have "name" (short, 2-4 words), "skillNames" (array of enabled skill names used by that recipe), and "prompt_template" (same [skill::name] format as prompt, under 180 characters).
 
 Hard requirements:
 - The natural language in "prompt", every recipe "name", and every recipe "prompt_template" MUST use the requested output language.
 - Every skill referenced in any recipe MUST come from the enabled skills list.
+- The number of recipes MUST exactly equal the number of enabled skills.
 - Every recipe MUST reference exactly one enabled skill.
 - Every recipe.skillNames array MUST contain exactly one skill name.
-- The union of all recipe.skillNames MUST exactly equal the full enabled skills list: no missing skills and no extra skills.
+- Every enabled skill MUST appear in exactly one recipe: no missing skills, no duplicate coverage, and no extra skills.
 - Each recipe.prompt_template must use exactly the same skills listed in that recipe's skillNames.
-- Prefer one clear recipe per skill. Do NOT combine multiple skills into one recipe.
+- Do NOT combine multiple skills into one recipe.
 
 Return ONLY the JSON object, no markdown fences, no explanation. Example: {"prompt": "[skill::brainstorming], [skill::code-review] I need to...", "recipes": [{"name": "Quick Review", "skillNames": ["code-review"], "prompt_template": "[skill::code-review] Review briefly:"}]}`,
 
