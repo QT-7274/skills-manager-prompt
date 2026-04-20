@@ -428,7 +428,7 @@ export const checkAppUpdate = () =>
 export interface AiResult {
   tags?: string[];
   prompt?: string;
-  recipes?: Array<{ name: string; prompt_template: string }>;
+  recipes?: Array<{ name: string; skillNames: string[]; prompt_template: string }>;
   scenarios?: {
     name: string;
     description: string;

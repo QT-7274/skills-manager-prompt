@@ -24,6 +24,63 @@ function makeSkillTag(name: string) {
   return `[skill::${name}]`;
 }
 
+interface GeneratedRecipeDraft {
+  name: string;
+  skillNames: string[];
+  prompt_template: string;
+}
+
+function normalizedSkillSet(skillNames: string[]) {
+  return new Set(skillNames.map((name) => name.trim()).filter(Boolean));
+}
+
+function describeCoverageMismatch(enabledSkills: string[], recipes: GeneratedRecipeDraft[]) {
+  const enabled = normalizedSkillSet(enabledSkills);
+  const used = new Set<string>();
+
+  for (const recipe of recipes) {
+    for (const skillName of recipe.skillNames) {
+      used.add(skillName.trim());
+    }
+  }
+
+  const missing = enabledSkills.filter((skillName) => !used.has(skillName));
+  const extra = [...used].filter((skillName) => !enabled.has(skillName));
+
+  return { missing, extra };
+}
+
+function isRecipeCoverageValid(enabledSkills: string[], recipes: GeneratedRecipeDraft[]) {
+  if (recipes.length === 0) return false;
+
+  const enabled = normalizedSkillSet(enabledSkills);
+  const used = new Set<string>();
+
+  for (const recipe of recipes) {
+    const recipeSkills = normalizedSkillSet(recipe.skillNames);
+    const templateSkills = extractUsedSkillNames(recipe.prompt_template);
+
+    if (recipeSkills.size !== 1 || templateSkills.size !== 1) {
+      return false;
+    }
+
+    for (const skillName of recipeSkills) {
+      if (!enabled.has(skillName) || !templateSkills.has(skillName)) {
+        return false;
+      }
+      used.add(skillName);
+    }
+
+    for (const skillName of templateSkills) {
+      if (!recipeSkills.has(skillName) || !enabled.has(skillName)) {
+        return false;
+      }
+    }
+  }
+
+  return used.size === enabled.size;
+}
+
 /** Render template to plain text for clipboard export. */
 function renderToPlainText(template: string): string {
   return template.replace(SKILL_TAG_RE, (_, name) => name);
@@ -44,7 +101,7 @@ export const ScenarioPromptEditor = forwardRef<
   ScenarioPromptEditorHandle,
   ScenarioPromptEditorProps
 >(function ScenarioPromptEditor({ scenarioId, scenarioName, onExit, onTemplateChange }, ref) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [template, setTemplate] = useState("");
   const [aiGenerating, setAiGenerating] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -164,11 +221,30 @@ export const ScenarioPromptEditor = forwardRef<
         name: s.name,
         description: s.description || "",
       }));
-      const result = await api.invokeCodebuddyAgent("generate_scenario_prompt", {
+      const enabledSkillNames = skillList.map((skill) => skill.name);
+
+      let result = await api.invokeCodebuddyAgent("generate_scenario_prompt", {
         scenarioName,
         skills: skillList,
+        outputLanguage: i18n.language,
       });
+      if (!isRecipeCoverageValid(enabledSkillNames, result.recipes ?? [])) {
+        const { missing, extra } = describeCoverageMismatch(enabledSkillNames, result.recipes ?? []);
+        result = await api.invokeCodebuddyAgent("generate_scenario_prompt", {
+          scenarioName,
+          skills: skillList,
+          outputLanguage: i18n.language,
+          retryFeedback: `Your previous recipes did not satisfy the exact recipe coverage and single-skill rule.
+- Missing skills: ${missing.length > 0 ? missing.join(", ") : "none"}
+- Extra skills: ${extra.length > 0 ? extra.join(", ") : "none"}
+- Fix the recipes so each recipe uses exactly one skill, and the union of all recipe.skillNames exactly equals the enabled skills list.`,
+        });
+      }
       if (!result.prompt) {
+        toast.error(t("mySkills.aiGeneratePromptError"));
+        return;
+      }
+      if (!isRecipeCoverageValid(enabledSkillNames, result.recipes ?? [])) {
         toast.error(t("mySkills.aiGeneratePromptError"));
         return;
       }

@@ -18,11 +18,20 @@ ${TAG_RULES}
 
 Tags should describe the skill's purpose, applicable tools, or technical domain. Return only a JSON array like ["React", "前端", "状态管理"], nothing else.`,
 
-  generate_scenario_prompt: `You are an AI coding assistant. Given the scenario name and skills below, generate a JSON object with two fields:
-- "prompt": a default prompt under 100 characters. It must start with skill names in [skill::name] format separated by commas, followed by a natural lead-in that invites the user to describe their task.
-- "recipes": an array of 2-4 recipe objects, each with "name" (short, 2-4 words) and "prompt_template" (same [skill::name] format as prompt, under 100 characters).
+  generate_scenario_prompt: `You are an AI coding assistant. Given the scenario name and enabled skills below, generate a JSON object with two fields:
+- "prompt": a default prompt under 180 characters. It must start with skill names in [skill::name] format separated by commas, followed by a natural lead-in that invites the user to describe their task.
+- "recipes": an array of 2-4 recipe objects, each with "name" (short, 2-4 words), "skillNames" (array of enabled skill names used by that recipe), and "prompt_template" (same [skill::name] format as prompt, under 180 characters).
 
-Return ONLY the JSON object, no markdown fences, no explanation. Example: {"prompt": "[skill::brainstorming], [skill::code-review] I need to...", "recipes": [{"name": "Quick Review", "prompt_template": "[skill::code-review] Review briefly:"}]}`,
+Hard requirements:
+- The natural language in "prompt", every recipe "name", and every recipe "prompt_template" MUST use the requested output language.
+- Every skill referenced in any recipe MUST come from the enabled skills list.
+- Every recipe MUST reference exactly one enabled skill.
+- Every recipe.skillNames array MUST contain exactly one skill name.
+- The union of all recipe.skillNames MUST exactly equal the full enabled skills list: no missing skills and no extra skills.
+- Each recipe.prompt_template must use exactly the same skills listed in that recipe's skillNames.
+- Prefer one clear recipe per skill. Do NOT combine multiple skills into one recipe.
+
+Return ONLY the JSON object, no markdown fences, no explanation. Example: {"prompt": "[skill::brainstorming], [skill::code-review] I need to...", "recipes": [{"name": "Quick Review", "skillNames": ["code-review"], "prompt_template": "[skill::code-review] Review briefly:"}]}`,
 
   create_scenario: `You are an AI coding assistant scenario planner. Based on the installed skills list below, suggest 2-5 scenario groupings. Each scenario should have: name (concise), description (one sentence), icon (one emoji), skillNames (array of skill names from the input). Return only a JSON array like [{"name":"...","description":"...","icon":"🎨","skillNames":["..."]}], nothing else.`,
 
@@ -56,11 +65,11 @@ function buildUserContent(task, payload) {
     case "tag_skill":
       return `Skill name: ${payload.skillName}\n\nSkill content:\n${payload.skillContent}`;
     case "generate_scenario_prompt":
-      return `Scenario: ${payload.scenarioName}\n\nSkills:\n${(payload.skills || []).map((s) => {
+      return `Scenario: ${payload.scenarioName}\nRequested output language: ${payload.outputLanguage || "zh"}\n\nEnabled skills (${(payload.skills || []).length} total):\n${(payload.skills || []).map((s) => {
         const desc = (s.description || "").trim();
         const truncated = desc.length > 80 ? desc.slice(0, 80) + "…" : desc;
         return truncated ? `- ${s.name}: ${truncated}` : `- ${s.name}`;
-      }).join("\n")}`;
+      }).join("\n")}${payload.retryFeedback ? `\n\nPrevious result was invalid.\n${payload.retryFeedback}` : ""}`;
     case "create_scenario": {
       const skillLines = payload.skills.map((s) => {
         const desc = (s.description || "No description").slice(0, 80);
@@ -123,16 +132,26 @@ function formatResult(task, rawText) {
     }
     case "generate_scenario_prompt": {
       const text = rawText.trim();
-      const MAX_PROMPT = 100;
+      const MAX_PROMPT = 180;
       const MIN_BREAK = 50;
-      // Expected shape: { prompt: string, recipes: [{ name, prompt_template }] }
+      // Expected shape: { prompt: string, recipes: [{ name, skillNames, prompt_template }] }
       const parsed = extractJson(text);
       if (parsed && typeof parsed.prompt === "string") {
         const prompt = parsed.prompt.trim().slice(0, MAX_PROMPT);
         const recipes = Array.isArray(parsed.recipes)
           ? parsed.recipes
-              .filter((r) => r && typeof r.name === "string" && typeof r.prompt_template === "string")
-              .map((r) => ({ ...r, prompt_template: r.prompt_template.trim().slice(0, MAX_PROMPT) }))
+              .filter((r) =>
+                r
+                && typeof r.name === "string"
+                && typeof r.prompt_template === "string"
+                && Array.isArray(r.skillNames)
+                && r.skillNames.every((name) => typeof name === "string")
+              )
+              .map((r) => ({
+                name: r.name.trim(),
+                skillNames: deduplicateTags(r.skillNames.map((name) => name.trim()).filter(Boolean)),
+                prompt_template: r.prompt_template.trim().slice(0, MAX_PROMPT),
+              }))
           : [];
         return { prompt, recipes };
       }
