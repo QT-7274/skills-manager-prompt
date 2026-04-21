@@ -251,15 +251,7 @@ fn ensure_dir_within_root(path: &Path, root: &Path) -> Result<(), AppError> {
 }
 
 fn remove_workspace_skill_target(path: &Path) -> Result<(), AppError> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        std::fs::remove_file(path)?;
-    } else if metadata.is_dir() {
-        std::fs::remove_dir_all(path)?;
-    } else {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
+    sync_engine::remove_target(path).map_err(AppError::io)
 }
 
 fn remove_symlink_entry(path: &Path) -> Result<(), AppError> {
@@ -273,8 +265,7 @@ fn remove_symlink_entry(path: &Path) -> Result<(), AppError> {
             "Duplicate skill entry is not a symlink — resolve manually",
         ));
     }
-    std::fs::remove_file(path)?;
-    Ok(())
+    sync_engine::remove_target(path).map_err(AppError::io)
 }
 
 fn set_project_skill_enabled_state(
@@ -1241,6 +1232,23 @@ mod tests {
         fs::create_dir_all(&real).unwrap();
         fs::write(real.join("SKILL.md"), "# hello").unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        remove_workspace_skill_target(&link).unwrap();
+
+        assert!(!link.exists());
+        assert!(real.exists());
+        assert!(real.join("SKILL.md").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_workspace_skill_target_removes_directory_symlink_without_touching_target() {
+        let tmp = tempdir().unwrap();
+        let real = tmp.path().join("real-skill");
+        let link = tmp.path().join("linked-skill");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("SKILL.md"), "# hello").unwrap();
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
         remove_workspace_skill_target(&link).unwrap();
 
