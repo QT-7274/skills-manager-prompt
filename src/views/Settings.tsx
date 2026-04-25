@@ -93,6 +93,9 @@ export function Settings() {
   // Agent path editing
   const [editingPathKey, setEditingPathKey] = useState<string | null>(null);
   const [editingPathValue, setEditingPathValue] = useState("");
+  // Project path editing (custom agents only)
+  const [editingProjectPathKey, setEditingProjectPathKey] = useState<string | null>(null);
+  const [editingProjectPathValue, setEditingProjectPathValue] = useState("");
   // Custom agent dialog
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [customName, setCustomName] = useState("");
@@ -118,6 +121,24 @@ export function Settings() {
       toast.error(String(e));
     } finally {
       setEditingPathKey(null);
+    }
+  };
+
+  const startEditProjectPath = useCallback((key: string, currentPath: string | null) => {
+    setEditingProjectPathKey(key);
+    setEditingProjectPathValue(currentPath ?? "");
+  }, []);
+
+  const handleSaveProjectPath = async () => {
+    if (!editingProjectPathKey) return;
+    const trimmed = editingProjectPathValue.trim();
+    try {
+      await api.setCustomToolProjectPath(editingProjectPathKey, trimmed || null);
+      await refreshTools();
+      toast.success(t("settings.pathSaved"));
+      setEditingProjectPathKey(null);
+    } catch (e) {
+      toast.error(String(e));
     }
   };
 
@@ -629,13 +650,53 @@ export function Settings() {
           <p className="truncate text-[12px] font-mono leading-tight text-muted" title={agent.skills_dir}>
             {agent.installed ? compactHomePath(agent.skills_dir) : t("settings.notInstalled")}
           </p>
-          {agent.is_custom && agent.project_relative_skills_dir && (
-            <p
-              className="truncate text-[12px] font-mono leading-tight text-muted"
-              title={agent.project_relative_skills_dir}
-            >
-              {t("settings.projectSkillsPathValue", { path: agent.project_relative_skills_dir })}
-            </p>
+          {agent.is_custom && (
+            editingProjectPathKey === agent.key ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={editingProjectPathValue}
+                  onChange={(e) => setEditingProjectPathValue(e.target.value)}
+                  placeholder={t("settings.projectSkillsPathPlaceholder")}
+                  className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveProjectPath();
+                    if (e.key === "Escape") setEditingProjectPathKey(null);
+                  }}
+                />
+                <button
+                  onClick={handleSaveProjectPath}
+                  className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+                >
+                  <Check className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => setEditingProjectPathKey(null)}
+                  className="shrink-0 p-1 text-muted hover:text-secondary outline-none"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  startEditProjectPath(agent.key, agent.project_relative_skills_dir)
+                }
+                className="group/projpath flex w-full items-center gap-1 truncate text-left text-[12px] font-mono leading-tight text-muted outline-none hover:text-secondary"
+                title={agent.project_relative_skills_dir ?? t("settings.projectSkillsPathDesc")}
+              >
+                <span className="truncate">
+                  {agent.project_relative_skills_dir
+                    ? t("settings.projectSkillsPathValue", {
+                        path: agent.project_relative_skills_dir,
+                      })
+                    : t("settings.projectSkillsPathEmpty")}
+                </span>
+                <Pencil className="h-2.5 w-2.5 shrink-0 opacity-0 transition-opacity group-hover/projpath:opacity-100" />
+              </button>
+            )
           )}
         </div>
       )}

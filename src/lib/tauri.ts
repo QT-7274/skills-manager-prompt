@@ -171,6 +171,15 @@ export const setCustomToolPath = (key: string, path: string) =>
 export const resetCustomToolPath = (key: string) =>
   invoke<void>("reset_custom_tool_path", { key });
 
+export const setCustomToolProjectPath = (
+  key: string,
+  projectRelativeSkillsDir: string | null,
+) =>
+  invoke<void>("set_custom_tool_project_path", {
+    key,
+    projectRelativeSkillsDir,
+  });
+
 export const addCustomTool = (
   key: string,
   displayName: string,

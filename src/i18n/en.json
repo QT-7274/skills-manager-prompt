@@ -371,6 +371,7 @@
     "projectSkillsPathPlaceholder": ".my-agent/skills",
     "projectSkillsPathDesc": "Optional. Set a path relative to the project root to make this custom agent available in project workspaces.",
     "projectSkillsPathValue": "Project path: {{path}}",
+    "projectSkillsPathEmpty": "Project path: not set (click to edit)",
     "projectAgentSupported": "Project workspace supported",
     "pathSaved": "Agent path updated",
     "pathReset": "Agent path reset to default",

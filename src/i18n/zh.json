@@ -371,6 +371,7 @@
     "projectSkillsPathPlaceholder": ".my-agent/skills",
     "projectSkillsPathDesc": "可选。填写相对项目根目录的路径后，这个自定义 Agent 才会出现在项目工作区的目标 Agent 列表中。",
     "projectSkillsPathValue": "项目路径：{{path}}",
+    "projectSkillsPathEmpty": "项目路径：未设置（点击编辑）",
     "projectAgentSupported": "支持项目工作区",
     "pathSaved": "Agent 路径已更新",
     "pathReset": "Agent 路径已恢复默认",

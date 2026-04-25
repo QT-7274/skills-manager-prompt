@@ -337,6 +337,33 @@ pub async fn reset_custom_tool_path(
 }
 
 #[tauri::command]
+pub async fn set_custom_tool_project_path(
+    key: String,
+    project_relative_skills_dir: Option<String>,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = key.trim().to_string();
+        if key.is_empty() {
+            return Err(AppError::invalid_input("Key is required"));
+        }
+        let normalized = normalize_project_relative_skills_dir_input(
+            project_relative_skills_dir.as_deref().unwrap_or_default(),
+        )?;
+
+        let mut customs = get_custom_tools(&store);
+        let custom = customs
+            .iter_mut()
+            .find(|c| c.key == key)
+            .ok_or_else(|| AppError::not_found(format!("Custom tool not found: {key}")))?;
+        custom.project_relative_skills_dir = normalized;
+        set_custom_tools(&store, &customs)
+    })
+    .await?
+}
+
+#[tauri::command]
 pub async fn add_custom_tool(
     key: String,
     display_name: String,
