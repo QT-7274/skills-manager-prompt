@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { ManagedSkill, Project, Scenario, ToolInfo } from "../lib/tauri";
 import * as api from "../lib/tauri";
@@ -41,6 +41,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [appError, setAppError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
+  const fileRefreshInFlightRef = useRef(false);
+  const pendingFileRefreshRef = useRef(false);
 
   const setTranslatedError = useCallback((key: string) => {
     setAppError(i18n.t("common.loadFailed", { item: i18n.t(key) }));
@@ -99,6 +101,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await Promise.all([refreshScenarios(), refreshTools(), refreshManagedSkills(), refreshProjects()]);
     setLoading(false);
   }, [refreshManagedSkills, refreshProjects, refreshScenarios, refreshTools]);
+
+  const refreshAfterFileChange = useCallback(async () => {
+    if (document.visibilityState !== "visible") {
+      pendingFileRefreshRef.current = true;
+      return;
+    }
+
+    if (fileRefreshInFlightRef.current) {
+      pendingFileRefreshRef.current = true;
+      return;
+    }
+
+    fileRefreshInFlightRef.current = true;
+    try {
+      do {
+        pendingFileRefreshRef.current = false;
+        await refreshAppData();
+      } while (pendingFileRefreshRef.current && document.visibilityState === "visible");
+    } catch (error) {
+      console.error("Failed to refresh after filesystem change:", error);
+    } finally {
+      fileRefreshInFlightRef.current = false;
+    }
+  }, [refreshAppData]);
 
   const handleSwitchScenario = useCallback(
     async (id: string) => {
@@ -172,23 +198,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(refreshTimer);
       }
       refreshTimer = setTimeout(() => {
-        refreshAppData().catch((error) => {
-          console.error("Failed to refresh after filesystem change:", error);
-        });
+        refreshAfterFileChange();
       }, 500);
     });
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && pendingFileRefreshRef.current) {
+        refreshAfterFileChange();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       if (refreshTimer) {
         clearTimeout(refreshTimer);
       }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       unlistenPromise
         .then((unlisten) => unlisten())
         .catch((error) => {
           console.error("Failed to unlisten app-files-changed:", error);
         });
     };
-  }, [refreshAppData]);
+  }, [refreshAfterFileChange]);
 
   // Auto-check skill updates on startup (non-blocking, silent)
   useEffect(() => {
