@@ -138,7 +138,10 @@ fn sync_watch_set(
 }
 
 fn should_emit(event: &Event) -> bool {
-    !event.paths.is_empty()
+    event.paths.iter().any(|path| {
+        path.components()
+            .all(|component| component.as_os_str() != ".git")
+    })
 }
 
 pub fn start_file_watcher<R: tauri::Runtime>(app: tauri::AppHandle<R>, store: Arc<SkillStore>) {
@@ -193,6 +196,7 @@ mod tests {
     use crate::core::skill_store::{ProjectRecord, SkillStore};
     use crate::core::tool_adapters::ToolAdapter;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -250,5 +254,21 @@ mod tests {
         let paths = collect_watch_paths_for_adapters(&store, adapters);
         assert!(paths.contains(&primary_dir));
         assert!(!paths.contains(&noisy_scan_dir));
+    }
+
+    #[test]
+    fn should_ignore_git_internal_events() {
+        let event = notify::Event::new(notify::EventKind::Any)
+            .add_path(PathBuf::from("/tmp/skills/.git/objects/aa/bb"));
+
+        assert!(!super::should_emit(&event));
+    }
+
+    #[test]
+    fn should_emit_regular_skill_events() {
+        let event = notify::Event::new(notify::EventKind::Any)
+            .add_path(PathBuf::from("/tmp/skills/example/SKILL.md"));
+
+        assert!(super::should_emit(&event));
     }
 }
