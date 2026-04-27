@@ -416,11 +416,26 @@ pub async fn install_git(
 
         emit_progress("cloning");
         let parsed = git_fetcher::parse_git_source(&repo_url);
-        let temp_dir = git_fetcher::clone_repo_ref(
+        let app_for_progress = app_handle.clone();
+        let url_for_progress = repo_url.clone();
+        let progress_cb: git_fetcher::ProgressCallback = Box::new(move |msg: &str| {
+            app_for_progress
+                .emit(
+                    "install-progress",
+                    serde_json::json!({
+                        "skill_id": url_for_progress,
+                        "phase": "cloning",
+                        "detail": msg,
+                    }),
+                )
+                .ok();
+        });
+        let temp_dir = git_fetcher::clone_repo_ref_with_progress(
             &parsed.clone_url,
             parsed.branch.as_deref(),
             Some(&cancel),
             proxy_url.as_deref(),
+            Some(progress_cb),
         )
         .map_err(AppError::classify_git_error)?;
 
@@ -488,9 +503,28 @@ pub async fn install_from_skillssh(
 
         emit_progress("cloning");
         let repo_url = format!("https://github.com/{}.git", source);
-        let temp_dir =
-            git_fetcher::clone_repo_ref(&repo_url, None, Some(&cancel), proxy_url.as_deref())
-                .map_err(AppError::classify_git_error)?;
+        let app_for_progress = app_handle.clone();
+        let skill_key_for_progress = skill_key.clone();
+        let progress_cb: git_fetcher::ProgressCallback = Box::new(move |msg: &str| {
+            app_for_progress
+                .emit(
+                    "install-progress",
+                    serde_json::json!({
+                        "skill_id": skill_key_for_progress,
+                        "phase": "cloning",
+                        "detail": msg,
+                    }),
+                )
+                .ok();
+        });
+        let temp_dir = git_fetcher::clone_repo_ref_with_progress(
+            &repo_url,
+            None,
+            Some(&cancel),
+            proxy_url.as_deref(),
+            Some(progress_cb),
+        )
+        .map_err(AppError::classify_git_error)?;
 
         emit_progress("installing");
         let install_result =
@@ -560,11 +594,26 @@ pub async fn preview_git_install(
             .ok();
 
         let parsed = git_fetcher::parse_git_source(&repo_url);
-        let temp_dir = git_fetcher::clone_repo_ref(
+        let app_for_progress = app_handle.clone();
+        let url_for_progress = repo_url.clone();
+        let progress_cb: git_fetcher::ProgressCallback = Box::new(move |msg: &str| {
+            app_for_progress
+                .emit(
+                    "install-progress",
+                    serde_json::json!({
+                        "skill_id": url_for_progress,
+                        "phase": "cloning",
+                        "detail": msg,
+                    }),
+                )
+                .ok();
+        });
+        let temp_dir = git_fetcher::clone_repo_ref_with_progress(
             &parsed.clone_url,
             parsed.branch.as_deref(),
             Some(&cancel),
             proxy_url.as_deref(),
+            Some(progress_cb),
         )
         .map_err(AppError::classify_git_error)?;
 
@@ -1492,20 +1541,30 @@ fn validate_clone_temp_path(temp_dir: &str) -> Result<PathBuf, AppError> {
     let temp_path = raw_path
         .canonicalize()
         .map_err(|_| AppError::invalid_input("Invalid temp directory"))?;
+
+    // Allow paths inside the system temp dir (legacy random clone dirs).
     let expected_prefix = std::env::temp_dir()
         .canonicalize()
         .unwrap_or_else(|_| std::env::temp_dir());
-    if !temp_path.starts_with(&expected_prefix) {
-        return Err(AppError::invalid_input("Invalid temp directory"));
+    if temp_path.starts_with(&expected_prefix) {
+        let dir_name_str = temp_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if dir_name_str.starts_with("skills-manager-clone-") {
+            return Ok(temp_path);
+        }
     }
-    let dir_name_str = temp_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    if !dir_name_str.starts_with("skills-manager-clone-") {
-        return Err(AppError::invalid_input("Invalid temp directory"));
+
+    // Allow paths inside the repo cache dir.
+    let cache_repos = central_repo::cache_dir().join("repos");
+    if let Ok(cache_canon) = cache_repos.canonicalize() {
+        if temp_path.starts_with(&cache_canon) {
+            return Ok(temp_path);
+        }
     }
-    Ok(temp_path)
+
+    Err(AppError::invalid_input("Invalid temp directory"))
 }
 
 fn resolve_skill_dir(
