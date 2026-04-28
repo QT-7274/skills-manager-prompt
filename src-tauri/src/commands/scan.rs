@@ -92,51 +92,47 @@ pub async fn import_existing_skill(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(&source_path);
-        let resolved_name =
-            installer::resolve_local_skill_name(&path, name.as_deref()).map_err(AppError::io)?;
-
-        let result =
-            installer::install_from_local(&path, Some(&resolved_name)).map_err(AppError::io)?;
-
-        if let Some(existing) = store
-            .get_skill_by_central_path(&result.central_path.to_string_lossy())
-            .map_err(AppError::db)?
-        {
-            if let Ok(Some(scenario_id)) = store.get_active_scenario_id() {
-                store
-                    .add_skill_to_scenario(&scenario_id, &existing.id)
-                    .map_err(AppError::db)?;
-            }
-            return Ok(());
-        }
-
-        let now = chrono::Utc::now().timestamp_millis();
-        let id = uuid::Uuid::new_v4().to_string();
-
-        let record = crate::core::skill_store::SkillRecord {
-            id: id.clone(),
-            name: result.name,
-            description: result.description,
-            source_type: "import".to_string(),
-            source_ref: Some(source_path),
-            source_ref_resolved: None,
-            source_subpath: None,
-            source_branch: None,
-            source_revision: None,
-            remote_revision: None,
-            central_path: result.central_path.to_string_lossy().to_string(),
-            content_hash: Some(result.content_hash),
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-            status: "ok".to_string(),
-            update_status: "local_only".to_string(),
-            last_checked_at: Some(now),
-            last_check_error: None,
-        };
-
         sync_metadata::with_repo_lock("import existing skill", || {
+            let path = PathBuf::from(&source_path);
+            let resolved_name = installer::resolve_local_skill_name(&path, name.as_deref())?;
+
+            let result = installer::install_from_local(&path, Some(&resolved_name))?;
+
+            if let Some(existing) =
+                store.get_skill_by_central_path(&result.central_path.to_string_lossy())?
+            {
+                if let Ok(Some(scenario_id)) = store.get_active_scenario_id() {
+                    store.add_skill_to_scenario(&scenario_id, &existing.id)?;
+                    sync_metadata::write_all_from_db_unlocked(&store)?;
+                }
+                return Ok(());
+            }
+
+            let now = chrono::Utc::now().timestamp_millis();
+            let id = uuid::Uuid::new_v4().to_string();
+
+            let record = crate::core::skill_store::SkillRecord {
+                id: id.clone(),
+                name: result.name,
+                description: result.description,
+                source_type: "import".to_string(),
+                source_ref: Some(source_path),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: result.central_path.to_string_lossy().to_string(),
+                content_hash: Some(result.content_hash),
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: Some(now),
+                last_check_error: None,
+            };
+
             store.insert_skill(&record)?;
 
             // Auto-add to active scenario
@@ -145,7 +141,7 @@ pub async fn import_existing_skill(
             }
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         Ok(())
     })
@@ -156,59 +152,72 @@ pub async fn import_existing_skill(
 pub async fn import_all_discovered(store: State<'_, Arc<SkillStore>>) -> Result<(), AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let discovered = store.get_all_discovered().map_err(AppError::db)?;
-        let groups = scanner::group_discovered(&discovered);
+        sync_metadata::with_repo_lock("import all discovered skills", || {
+            let discovered = store.get_all_discovered()?;
+            let groups = scanner::group_discovered(&discovered);
 
-        let active_scenario = store.get_active_scenario_id().ok().flatten();
+            let active_scenario = store.get_active_scenario_id().ok().flatten();
+            let mut changed = false;
 
-        for group in groups {
-            if group.imported {
-                continue;
-            }
-            if let Some(first) = group.locations.first() {
-                let path = PathBuf::from(&first.found_path);
+            for group in groups {
+                if group.imported {
+                    continue;
+                }
+                if let Some(first) = group.locations.first() {
+                    let path = PathBuf::from(&first.found_path);
 
-                if let Ok(result) = installer::install_from_local(&path, Some(&group.name)) {
-                    if let Ok(Some(existing)) =
-                        store.get_skill_by_central_path(&result.central_path.to_string_lossy())
-                    {
-                        if let Some(ref scenario_id) = active_scenario {
-                            store.add_skill_to_scenario(scenario_id, &existing.id).ok();
+                    if let Ok(result) = installer::install_from_local(&path, Some(&group.name)) {
+                        if let Some(existing) = store
+                            .get_skill_by_central_path(&result.central_path.to_string_lossy())?
+                        {
+                            if let Some(ref scenario_id) = active_scenario {
+                                store.add_skill_to_scenario(scenario_id, &existing.id)?;
+                                changed = true;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
 
-                    let now = chrono::Utc::now().timestamp_millis();
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let record = crate::core::skill_store::SkillRecord {
-                        id: id.clone(),
-                        name: result.name,
-                        description: result.description,
-                        source_type: "import".to_string(),
-                        source_ref: Some(first.found_path.clone()),
-                        source_ref_resolved: None,
-                        source_subpath: None,
-                        source_branch: None,
-                        source_revision: None,
-                        remote_revision: None,
-                        central_path: result.central_path.to_string_lossy().to_string(),
-                        content_hash: Some(result.content_hash),
-                        enabled: true,
-                        created_at: now,
-                        updated_at: now,
-                        status: "ok".to_string(),
-                        update_status: "local_only".to_string(),
-                        last_checked_at: Some(now),
-                        last_check_error: None,
-                    };
-                    store.insert_skill(&record).ok();
+                        let now = chrono::Utc::now().timestamp_millis();
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let record = crate::core::skill_store::SkillRecord {
+                            id: id.clone(),
+                            name: result.name,
+                            description: result.description,
+                            source_type: "import".to_string(),
+                            source_ref: Some(first.found_path.clone()),
+                            source_ref_resolved: None,
+                            source_subpath: None,
+                            source_branch: None,
+                            source_revision: None,
+                            remote_revision: None,
+                            central_path: result.central_path.to_string_lossy().to_string(),
+                            content_hash: Some(result.content_hash),
+                            enabled: true,
+                            created_at: now,
+                            updated_at: now,
+                            status: "ok".to_string(),
+                            update_status: "local_only".to_string(),
+                            last_checked_at: Some(now),
+                            last_check_error: None,
+                        };
+                        store.insert_skill(&record)?;
+                        changed = true;
 
-                    if let Some(ref scenario_id) = active_scenario {
-                        store.add_skill_to_scenario(scenario_id, &id).ok();
+                        if let Some(ref scenario_id) = active_scenario {
+                            store.add_skill_to_scenario(scenario_id, &id)?;
+                            changed = true;
+                        }
                     }
                 }
             }
-        }
+
+            if changed {
+                sync_metadata::write_all_from_db_unlocked(&store)?;
+            }
+
+            Ok(())
+        })
+        .map_err(AppError::io)?;
 
         Ok(())
     })

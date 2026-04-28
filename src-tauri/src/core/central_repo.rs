@@ -1,10 +1,15 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 
 const CONFIG_FILE_NAME: &str = "repo-config.json";
+
+#[cfg(test)]
+static TEST_BASE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RepoPathConfig {
@@ -84,7 +89,25 @@ pub fn configured_base_dir() -> Option<PathBuf> {
 }
 
 pub fn base_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_BASE_DIR_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap()
+        .clone()
+    {
+        return path;
+    }
+
     configured_base_dir().unwrap_or_else(default_base_dir)
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_base_dir_override(path: Option<PathBuf>) {
+    *TEST_BASE_DIR_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap() = path;
 }
 
 pub fn skills_dir() -> PathBuf {

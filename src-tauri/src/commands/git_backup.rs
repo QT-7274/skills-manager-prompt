@@ -8,6 +8,16 @@ use walkdir::WalkDir;
 use crate::core::skill_store::SkillStore;
 
 #[tauri::command]
+pub async fn git_backup_fetch(store: State<'_, Arc<SkillStore>>) -> Result<(), AppError> {
+    let _ = store;
+    let skills_dir = central_repo::skills_dir();
+    tokio::task::spawn_blocking(move || {
+        git_backup::fetch_remote(&skills_dir).map_err(AppError::git)
+    })
+    .await?
+}
+
+#[tauri::command]
 pub async fn git_backup_status(
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<git_backup::GitBackupStatus, AppError> {
@@ -19,10 +29,16 @@ pub async fn git_backup_status(
 
 #[tauri::command]
 pub async fn git_backup_init(store: State<'_, Arc<SkillStore>>) -> Result<(), AppError> {
-    let _ = store;
+    let store = store.inner().clone();
     let skills_dir = central_repo::skills_dir();
-    tokio::task::spawn_blocking(move || git_backup::init_repo(&skills_dir).map_err(AppError::git))
-        .await?
+    tokio::task::spawn_blocking(move || {
+        git_backup::with_repo_lock(&skills_dir, "git init", || {
+            sync_metadata::write_all_from_db_unlocked(&store)?;
+            git_backup::init_repo_unlocked(&skills_dir)
+        })
+        .map_err(AppError::git)
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -98,6 +114,27 @@ pub async fn git_backup_clone(
     .await?
 }
 
+/// Recovery: discard the local `.git` and re-clone from the configured remote.
+/// Existing skill files are preserved via the same backup-then-merge flow
+/// used by the regular clone path.
+#[tauri::command]
+pub async fn git_backup_reclone(
+    store: State<'_, Arc<SkillStore>>,
+    url: String,
+) -> Result<(), AppError> {
+    git_fetcher::validate_git_url(&url).map_err(AppError::git)?;
+    let store = store.inner().clone();
+    let skills_dir = central_repo::skills_dir();
+    tokio::task::spawn_blocking(move || {
+        git_backup::with_repo_lock(&skills_dir, "git reclone", || {
+            git_backup::reclone_from_remote_unlocked(&skills_dir, &url)?;
+            reconcile_skills_index_unlocked(&store)
+        })
+        .map_err(AppError::classify_git_error)
+    })
+    .await?
+}
+
 #[tauri::command]
 pub async fn git_backup_create_snapshot(
     store: State<'_, Arc<SkillStore>>,
@@ -144,7 +181,7 @@ pub async fn git_backup_restore_version(
 
 fn reconcile_skills_index_unlocked(store: &SkillStore) -> anyhow::Result<()> {
     sync_metadata::cleanup_temporary_files()?;
-    if sync_metadata::metadata_exists() {
+    if sync_metadata::has_complete_skill_snapshot() {
         sync_metadata::reindex_from_metadata_unlocked(store)?;
         return Ok(());
     }

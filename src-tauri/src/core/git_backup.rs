@@ -39,6 +39,9 @@ pub struct GitBackupStatus {
     pub current_snapshot_tag: Option<String>,
     /// Snapshot tag restored most recently (when HEAD is a restore commit)
     pub restored_from_tag: Option<String>,
+    /// Health of the relationship to the configured remote.
+    /// One of: "healthy", "no_remote", "no_upstream", "unrelated_histories", "detached".
+    pub upstream_health: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -51,6 +54,22 @@ pub struct GitBackupVersion {
     pub message: String,
     /// Commit timestamp (ISO 8601)
     pub committed_at: String,
+}
+
+/// Fetch from the remote without modifying the working tree.
+/// This is best-effort so status refresh still works while offline.
+pub fn fetch_remote(skills_dir: &Path) -> Result<()> {
+    if !skills_dir.join(".git").exists() {
+        return Ok(());
+    }
+    if run_git(skills_dir, &["remote", "get-url", "origin"]).is_err() {
+        return Ok(());
+    }
+
+    let branch = run_git(skills_dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|_| "main".to_string());
+    let _ = run_git(skills_dir, &["fetch", "--quiet", "origin", &branch]);
+    Ok(())
 }
 
 /// Get the current git status of the skills directory.
@@ -67,6 +86,7 @@ pub fn get_status(skills_dir: &Path) -> Result<GitBackupStatus> {
             last_commit_time: None,
             current_snapshot_tag: None,
             restored_from_tag: None,
+            upstream_health: "no_remote".to_string(),
         });
     }
 
@@ -110,6 +130,8 @@ pub fn get_status(skills_dir: &Path) -> Result<GitBackupStatus> {
         .as_deref()
         .and_then(parse_restored_from_tag_message);
 
+    let upstream_health = detect_upstream_health(skills_dir, remote_url.is_some());
+
     Ok(GitBackupStatus {
         is_repo: true,
         remote_url,
@@ -121,10 +143,30 @@ pub fn get_status(skills_dir: &Path) -> Result<GitBackupStatus> {
         last_commit_time,
         current_snapshot_tag,
         restored_from_tag,
+        upstream_health,
     })
 }
 
+/// Detect how the local repo relates to the configured remote.
+/// Returns one of: "healthy", "no_remote", "no_upstream", "unrelated_histories", "detached".
+fn detect_upstream_health(dir: &Path, has_remote: bool) -> String {
+    if !has_remote {
+        return "no_remote".to_string();
+    }
+    if run_git(dir, &["symbolic-ref", "-q", "HEAD"]).is_err() {
+        return "detached".to_string();
+    }
+    if run_git(dir, &["rev-parse", "--abbrev-ref", "@{upstream}"]).is_err() {
+        return "no_upstream".to_string();
+    }
+    if run_git(dir, &["merge-base", "HEAD", "@{upstream}"]).is_err() {
+        return "unrelated_histories".to_string();
+    }
+    "healthy".to_string()
+}
+
 /// Initialize a new git repository in the skills directory.
+#[allow(dead_code)]
 pub fn init_repo(skills_dir: &Path) -> Result<()> {
     let _lock = RepoLock::acquire(skills_dir, "git init")?;
     init_repo_unlocked(skills_dir)
@@ -280,7 +322,11 @@ pub fn pull(skills_dir: &Path) -> Result<()> {
 pub(crate) fn pull_unlocked(skills_dir: &Path) -> Result<()> {
     ensure_repo(skills_dir)?;
     ensure_no_interrupted_git_operation(skills_dir)?;
-    run_git_checked(skills_dir, &["pull", "--no-rebase"])?;
+    let branch = run_git(skills_dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|_| "main".to_string());
+
+    run_git_checked(skills_dir, &["fetch", "origin", &branch])?;
+    run_git_checked(skills_dir, &["merge", &format!("origin/{branch}")])?;
     Ok(())
 }
 
@@ -450,6 +496,66 @@ pub fn clone_into(skills_dir: &Path, url: &str) -> Result<()> {
     clone_into_unlocked(skills_dir, url)
 }
 
+/// Reset a local repo by clearing its `.git` then cloning from the remote.
+/// The existing skill files are preserved through the same backup-then-merge flow
+/// used by `clone_into_unlocked`. The previous `.git` is moved to a sibling
+/// directory and only deleted after a successful clone, so a failed re-clone
+/// (e.g., network/auth error) restores the original repository state instead
+/// of permanently losing history, snapshots, and remotes.
+pub(crate) fn reclone_from_remote_unlocked(skills_dir: &Path, url: &str) -> Result<()> {
+    let git_dir = skills_dir.join(".git");
+    if !git_dir.exists() {
+        return clone_into_unlocked(skills_dir, url);
+    }
+
+    let ts = Utc::now().format("%Y%m%d-%H%M%S");
+    let git_backup = skills_dir.with_file_name(format!("skills-git-recovery-{ts}"));
+    if git_backup.exists() {
+        std::fs::remove_dir_all(&git_backup)?;
+    }
+    std::fs::rename(&git_dir, &git_backup)
+        .context("Failed to move existing .git aside before re-clone")?;
+
+    match clone_into_unlocked(skills_dir, url) {
+        Ok(()) => {
+            let _ = std::fs::remove_dir_all(&git_backup);
+            Ok(())
+        }
+        Err(e) => {
+            // Two failure shapes are possible inside clone_into_unlocked:
+            //   1. `git clone` itself failed: clone_into_unlocked already
+            //      restored skill files from skills-backup-before-clone, and
+            //      no `.git` exists in skills_dir.
+            //   2. `git clone` succeeded but the subsequent merge_backup
+            //      step failed: skills_dir now contains a fresh `.git` plus
+            //      partially-merged files, and the user's original files are
+            //      still parked at skills-backup-before-clone.
+            // In case 2 we must tear down the partial clone and restore the
+            // pre-clone user files before renaming our saved .git back, or
+            // the rename collides with the new .git and silently leaves the
+            // user inside the wrong repository.
+            let new_git_dir = skills_dir.join(".git");
+            if new_git_dir.exists() {
+                let pre_clone_backup = skills_dir.with_file_name("skills-backup-before-clone");
+                let _ = std::fs::remove_dir_all(skills_dir);
+                if pre_clone_backup.exists() {
+                    let _ = std::fs::rename(&pre_clone_backup, skills_dir);
+                }
+            }
+            if !skills_dir.exists() {
+                let _ = std::fs::create_dir_all(skills_dir);
+            }
+            if let Err(restore_err) = std::fs::rename(&git_backup, skills_dir.join(".git")) {
+                anyhow::bail!(
+                    "Re-clone failed: {e}. Could not restore previous .git directory ({restore_err}); a backup is kept at {}",
+                    git_backup.display()
+                );
+            }
+            Err(e)
+        }
+    }
+}
+
 pub(crate) fn clone_into_unlocked(skills_dir: &Path, url: &str) -> Result<()> {
     if skills_dir.join(".git").exists() {
         anyhow::bail!("Skills directory is already a git repository");
@@ -568,8 +674,24 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        anyhow::bail!("git command failed: {}", redact_urls_in_text(&stderr))
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let filtered = stderr
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim().trim_start_matches("** ");
+                !trimmed.starts_with("WARNING:")
+                    && !trimmed.starts_with("This session may")
+                    && !trimmed.starts_with("The server may")
+                    && !trimmed.starts_with("See https://openssh.com")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let msg = if filtered.trim().is_empty() {
+            stderr.trim()
+        } else {
+            filtered.trim()
+        };
+        anyhow::bail!("git command failed: {}", redact_urls_in_text(msg))
     }
 }
 

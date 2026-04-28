@@ -15,6 +15,7 @@ import {
   GitBranch,
   History,
   ArrowUpCircle,
+  Wrench,
   Loader2,
   X,
   Plus,
@@ -32,6 +33,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SkillDetailPanel } from "../components/SkillDetailPanel";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { BatchTagDialog } from "../components/BatchTagDialog";
+import { GitSetupDialog } from "../components/GitSetupDialog";
+import { GitRecoveryDialog } from "../components/GitRecoveryDialog";
 import { SyncDots } from "../components/SyncDots";
 import * as api from "../lib/tauri";
 import { getTagActiveColor, getTagColor } from "../lib/skillTags";
@@ -150,6 +153,8 @@ export function MySkills() {
   const [gitVersions, setGitVersions] = useState<GitBackupVersion[]>([]);
   const [restoreVersionTag, setRestoreVersionTag] = useState<string | null>(null);
   const [restoringVersionTag, setRestoringVersionTag] = useState<string | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [tagEditSkillId, setTagEditSkillId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
@@ -284,12 +289,10 @@ export function MySkills() {
     const kind = getErrorKind(error);
     const message = getErrorMessage(error, "");
 
-    // Use structured kind for high-level classification
     if (kind === "network") {
       return t("settings.gitErrorNetwork");
     }
 
-    // Fall back to message-based matching for git-specific sub-categories
     if (
       message.includes("Authentication failed")
       || message.includes("Permission denied")
@@ -305,6 +308,21 @@ export function MySkills() {
     ) {
       return t("settings.gitErrorNetwork");
     }
+    // Order matters: check specific reject reasons before the generic conflict keyword.
+    if (message.includes("unrelated histories") || message.includes("refusing to merge")) {
+      return t("settings.gitErrorUnrelatedHistories");
+    }
+    if (
+      message.includes("[rejected]")
+      || message.includes("non-fast-forward")
+      || message.includes("fetch first")
+      || message.includes("failed to push some refs")
+    ) {
+      return t("settings.gitErrorRejected");
+    }
+    if (message.includes("no upstream") || message.includes("has no upstream branch")) {
+      return t("settings.gitErrorNoUpstream");
+    }
     if (message.includes("CONFLICT") || message.includes("conflict")) {
       return t("settings.gitErrorConflict");
     }
@@ -319,8 +337,23 @@ export function MySkills() {
     return fallback;
   };
 
+  // Detect errors that mean "the local repo's relationship to remote needs structural repair".
+  const isRecoverableSetupError = (error: unknown) => {
+    const message = getErrorMessage(error, "");
+    return (
+      message.includes("unrelated histories")
+      || message.includes("refusing to merge")
+      || message.includes("[rejected]")
+      || message.includes("non-fast-forward")
+      || message.includes("fetch first")
+      || message.includes("failed to push some refs")
+      || message.includes("no upstream")
+    );
+  };
+
   const refreshGitStatus = useCallback(async () => {
     try {
+      await api.gitBackupFetch().catch(() => {});
       const status = await api.gitBackupStatus();
       setGitStatus(status);
     } catch {
@@ -717,19 +750,56 @@ export function MySkills() {
     });
   };
 
-  const handleGitStartBackup = async () => {
+  const handleSetupClone = async () => {
     setGitLoading("start");
     try {
-      if (gitRemoteConfig) {
-        await api.gitBackupClone(gitRemoteConfig);
-        toast.success(t("settings.gitCloneSuccess"));
-      } else {
-        await api.gitBackupInit();
-        toast.success(t("settings.gitInitSuccess"));
-      }
+      await api.gitBackupClone(gitRemoteConfig);
+      toast.success(t("settings.gitCloneSuccess"));
       await refreshGitStatus();
     } catch (e) {
       toast.error(mapGitError(e));
+      throw e;
+    } finally {
+      setGitLoading(null);
+    }
+  };
+
+  const handleSetupInit = async () => {
+    setGitLoading("start");
+    try {
+      await api.gitBackupInit();
+      // If a remote is configured, attach it so the toolbar reflects "needs first push"
+      // rather than "synced", and the next click of Sync can push -u origin <branch>.
+      if (gitRemoteConfig) {
+        try {
+          await api.gitBackupSetRemote(gitRemoteConfig);
+        } catch (remoteErr) {
+          toast.error(mapGitError(remoteErr));
+        }
+      }
+      toast.success(t("settings.gitInitSuccess"));
+      await refreshGitStatus();
+    } catch (e) {
+      toast.error(mapGitError(e));
+      throw e;
+    } finally {
+      setGitLoading(null);
+    }
+  };
+
+  const handleRecoveryReclone = async () => {
+    if (!gitRemoteConfig) {
+      toast.info(t("settings.gitNeedRemoteSetup"));
+      return;
+    }
+    setGitLoading("recovery");
+    try {
+      await api.gitBackupReclone(gitRemoteConfig);
+      toast.success(t("settings.gitRecoveryRecloneSuccess"));
+      await Promise.all([refreshGitStatus(), refreshManagedSkills()]);
+    } catch (e) {
+      toast.error(mapGitError(e));
+      throw e;
     } finally {
       setGitLoading(null);
     }
@@ -751,6 +821,20 @@ export function MySkills() {
 
       if (!status.remote_url) {
         toast.info(t("settings.gitNeedRemoteSetup"));
+        return;
+      }
+
+      // Pre-flight: surface structural problems that would corrupt or block sync.
+      // `no_upstream` is intentionally NOT treated as fatal here — the backend's
+      // push path retries with `push -u origin <branch>`, which is the correct
+      // behavior for a freshly initialized repo or an empty remote. If that
+      // retry actually fails we'll still route to the recovery dialog via the
+      // post-failure handler below.
+      if (
+        status.upstream_health === "unrelated_histories"
+        || status.upstream_health === "detached"
+      ) {
+        setRecoveryOpen(true);
         return;
       }
 
@@ -780,7 +864,15 @@ export function MySkills() {
         await refreshGitVersions();
       }
     } catch (e) {
-      toast.error(mapGitError(e));
+      // If sync failed because local/remote diverged, route the user into the recovery flow
+      // instead of leaving them with a raw git error.
+      if (isRecoverableSetupError(e)) {
+        toast.error(mapGitError(e));
+        await refreshGitStatus();
+        setRecoveryOpen(true);
+      } else {
+        toast.error(mapGitError(e));
+      }
     } finally {
       setGitLoading(null);
     }
@@ -802,40 +894,82 @@ export function MySkills() {
     }
   };
 
-  const getGitSyncButtonState = () => {
-    if (!gitStatus) {
-      return {
-        label: t("mySkills.gitRepoSync"),
-        disabled: false,
-        toneClassName: "text-secondary",
-      };
+  type GitToolbarMode =
+    | "loading"
+    | "uninitialized"
+    | "needs_remote"
+    | "needs_fix"
+    | "up_to_date"
+    | "pending_changes";
+
+  const getGitToolbarMode = (): GitToolbarMode => {
+    if (!gitStatus) return "loading";
+    if (!gitStatus.is_repo) return "uninitialized";
+    if (!gitStatus.remote_url && !gitRemoteConfig) return "needs_remote";
+    if (
+      gitStatus.upstream_health === "unrelated_histories"
+      || gitStatus.upstream_health === "detached"
+    ) {
+      return "needs_fix";
     }
-    if (!gitStatus.remote_url && !gitRemoteConfig) {
-      return {
-        label: t("mySkills.gitRepoNeedRemote"),
-        disabled: true,
-        toneClassName: "text-red-500",
-      };
+    // First-push case: remote is set but upstream tracking is not yet established.
+    // Treat as a normal pending sync — the push path will set upstream automatically.
+    if (gitStatus.upstream_health === "no_upstream") {
+      return "pending_changes";
     }
     if (gitStatus.has_changes || gitStatus.ahead > 0 || gitStatus.behind > 0) {
-      return {
-        label: t("mySkills.gitRepoSync"),
-        disabled: false,
-        toneClassName: "text-amber-500",
-      };
+      return "pending_changes";
     }
-    if (!gitStatus.has_changes && gitStatus.ahead === 0 && gitStatus.behind === 0) {
-      return {
-        label: t("mySkills.gitRepoUpToDate"),
-        disabled: true,
-        toneClassName: "text-muted",
-      };
+    return "up_to_date";
+  };
+
+  const formatSnapshotWhen = (tag: string | null) => {
+    if (!tag) return null;
+    const label = displaySnapshotLabel(tag);
+    // Try to format YYYYMMDD-HHMMSS into MM-DD HH:MM
+    const match = label.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+    if (match) {
+      const [, , month, day, hour, min] = match;
+      return `${month}-${day} ${hour}:${min}`;
     }
-    return {
-      label: t("mySkills.gitRepoSync"),
-      disabled: false,
-      toneClassName: "text-secondary",
-    };
+    return label;
+  };
+
+  // Compact inline status: only render when there's actionable info the button alone
+  // does not convey. The button already tells the user "Synced" / "Set Up Backup" /
+  // "Fix Sync Setup", so we suppress redundant labels for those modes.
+  const renderGitInlineStatus = (mode: GitToolbarMode) => {
+    if (!gitStatus || mode === "loading" || mode === "up_to_date") return null;
+    if (mode === "uninitialized" || mode === "needs_remote" || mode === "needs_fix") {
+      return null;
+    }
+    const parts: string[] = [];
+    if (gitStatus.has_changes || gitStatus.ahead > 0) {
+      const localCount = Math.max(gitStatus.ahead, gitStatus.has_changes ? 1 : 0);
+      parts.push(`↑${localCount}`);
+    }
+    if (gitStatus.behind > 0) {
+      parts.push(`↓${gitStatus.behind}`);
+    }
+    if (parts.length === 0 && gitStatus.upstream_health === "no_upstream") {
+      parts.push("↑");
+    }
+    if (parts.length === 0) return null;
+    return (
+      <span
+        className="text-[11px] font-medium text-amber-600 dark:text-amber-400 tabular-nums"
+        title={[
+          gitStatus.has_changes || gitStatus.ahead > 0
+            ? t("mySkills.gitInlineLocalChanges", { count: Math.max(gitStatus.ahead, gitStatus.has_changes ? 1 : 0) })
+            : null,
+          gitStatus.behind > 0 ? t("mySkills.gitInlineRemoteUpdates", { count: gitStatus.behind }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      >
+        {parts.join(" ")}
+      </span>
+    );
   };
 
   const sourceIcon = (type: string) => {
@@ -966,54 +1100,85 @@ export function MySkills() {
         </div>
 
         <div className="app-segmented">
-          {!gitStatus?.is_repo ? (
-            <button
-              onClick={handleGitStartBackup}
-              disabled={!!gitLoading}
-              className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
-            >
-              {gitLoading === "start" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <GitBranch className="h-3.5 w-3.5" />
-              )}
-              {gitLoading === "start" ? t("settings.gitInitializing") : t("settings.gitStartBackup")}
-            </button>
-          ) : (
-            (() => {
-              const gitSyncButton = getGitSyncButtonState();
-              return (
-                <>
+          {(() => {
+            const mode = getGitToolbarMode();
+            const inlineStatus = renderGitInlineStatus(mode);
+            const snapshotWhen = formatSnapshotWhen(gitStatus?.current_snapshot_tag ?? null);
+            return (
+              <>
+                {inlineStatus ? (
+                  <span className="mr-0.5 inline-flex items-center px-1 leading-tight">
+                    {inlineStatus}
+                  </span>
+                ) : null}
+
+                {mode === "uninitialized" || mode === "needs_remote" ? (
+                  <button
+                    onClick={() => setSetupOpen(true)}
+                    disabled={!!gitLoading}
+                    className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
+                  >
+                    {gitLoading === "start" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <GitBranch className="h-3.5 w-3.5" />
+                    )}
+                    {gitLoading === "start" ? t("settings.gitInitializing") : t("settings.gitStartBackup")}
+                  </button>
+                ) : mode === "needs_fix" ? (
+                  <button
+                    onClick={() => setRecoveryOpen(true)}
+                    disabled={!!gitLoading}
+                    className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-red-500 transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  >
+                    {gitLoading === "recovery" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wrench className="h-3.5 w-3.5" />
+                    )}
+                    {t("mySkills.gitRepoFixSetup")}
+                  </button>
+                ) : (
                   <button
                     onClick={handleGitSync}
-                    disabled={!!gitLoading || gitSyncButton.disabled}
+                    disabled={!!gitLoading || mode === "up_to_date"}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium transition-colors hover:bg-surface-hover disabled:opacity-50",
-                      gitSyncButton.toneClassName
+                      mode === "pending_changes" ? "text-amber-600 dark:text-amber-400" : "text-muted"
                     )}
                   >
                     {gitLoading === "sync" ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : mode === "up_to_date" ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
                     ) : (
                       <ArrowUpCircle className="h-3.5 w-3.5" />
                     )}
-                    {gitLoading === "sync" ? t("mySkills.gitRepoSyncing") : gitSyncButton.label}
+                    {gitLoading === "sync"
+                      ? t("mySkills.gitRepoSyncing")
+                      : mode === "up_to_date"
+                        ? t("mySkills.gitRepoSynced")
+                        : t("mySkills.gitRepoSync")}
                   </button>
+                )}
+
+                {gitStatus?.is_repo ? (
                   <button
                     onClick={() => setGitVersionsOpen((v) => !v)}
                     disabled={!!gitLoading}
+                    title={snapshotWhen ? t("mySkills.gitInlineLastSnapshot", { when: snapshotWhen }) : undefined}
                     className={cn(
                       "ml-1 inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium transition-colors hover:bg-surface-hover disabled:opacity-50",
                       gitVersionsOpen ? "text-secondary" : "text-muted"
                     )}
                   >
                     <History className="h-3.5 w-3.5" />
-                    {t("mySkills.gitVersionHistory")}
+                    {t("mySkills.gitSnapshots")}
                   </button>
-                </>
-              );
-            })()
-          )}
+                ) : null}
+              </>
+            );
+          })()}
           <button
             onClick={handleCheckAllUpdates}
             disabled={checkingAll}
@@ -1585,6 +1750,19 @@ export function MySkills() {
         confirmLabel={t("mySkills.gitVersionRestore")}
         onClose={() => setRestoreVersionTag(null)}
         onConfirm={handleRestoreVersion}
+      />
+      <GitSetupDialog
+        open={setupOpen}
+        hasRemote={!!gitRemoteConfig}
+        onClose={() => setSetupOpen(false)}
+        onClone={handleSetupClone}
+        onInit={handleSetupInit}
+      />
+      <GitRecoveryDialog
+        open={recoveryOpen}
+        health={gitStatus?.upstream_health ?? "unrelated_histories"}
+        onClose={() => setRecoveryOpen(false)}
+        onReclone={handleRecoveryReclone}
       />
     </div>
   );
