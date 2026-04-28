@@ -353,6 +353,7 @@ export function MySkills() {
 
   const refreshGitStatus = useCallback(async () => {
     try {
+      await api.gitBackupFetch().catch(() => {});
       const status = await api.gitBackupStatus();
       setGitStatus(status);
     } catch {

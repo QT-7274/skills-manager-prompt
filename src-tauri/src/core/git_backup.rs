@@ -56,6 +56,22 @@ pub struct GitBackupVersion {
     pub committed_at: String,
 }
 
+/// Fetch from the remote without modifying the working tree.
+/// This is best-effort so status refresh still works while offline.
+pub fn fetch_remote(skills_dir: &Path) -> Result<()> {
+    if !skills_dir.join(".git").exists() {
+        return Ok(());
+    }
+    if run_git(skills_dir, &["remote", "get-url", "origin"]).is_err() {
+        return Ok(());
+    }
+
+    let branch = run_git(skills_dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|_| "main".to_string());
+    let _ = run_git(skills_dir, &["fetch", "--quiet", "origin", &branch]);
+    Ok(())
+}
+
 /// Get the current git status of the skills directory.
 pub fn get_status(skills_dir: &Path) -> Result<GitBackupStatus> {
     if !skills_dir.join(".git").exists() {
@@ -306,7 +322,11 @@ pub fn pull(skills_dir: &Path) -> Result<()> {
 pub(crate) fn pull_unlocked(skills_dir: &Path) -> Result<()> {
     ensure_repo(skills_dir)?;
     ensure_no_interrupted_git_operation(skills_dir)?;
-    run_git_checked(skills_dir, &["pull", "--no-rebase"])?;
+    let branch = run_git(skills_dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|_| "main".to_string());
+
+    run_git_checked(skills_dir, &["fetch", "origin", &branch])?;
+    run_git_checked(skills_dir, &["merge", &format!("origin/{branch}")])?;
     Ok(())
 }
 
@@ -654,8 +674,24 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        anyhow::bail!("git command failed: {}", redact_urls_in_text(&stderr))
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let filtered = stderr
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim().trim_start_matches("** ");
+                !trimmed.starts_with("WARNING:")
+                    && !trimmed.starts_with("This session may")
+                    && !trimmed.starts_with("The server may")
+                    && !trimmed.starts_with("See https://openssh.com")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let msg = if filtered.trim().is_empty() {
+            stderr.trim()
+        } else {
+            filtered.trim()
+        };
+        anyhow::bail!("git command failed: {}", redact_urls_in_text(msg))
     }
 }
 
