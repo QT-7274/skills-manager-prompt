@@ -486,25 +486,24 @@ export function MySkills() {
 
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedIds);
-    let deleted = 0;
-    for (const id of ids) {
-      try {
-        await api.deleteManagedSkill(id);
-        if (selectedSkill?.id === id) closeSkillDetail();
-        deleted++;
-      } catch {
-        // continue deleting remaining
+    try {
+      const result = await api.deleteManagedSkills(ids);
+      if (selectedSkill && ids.includes(selectedSkill.id) && !result.failed.includes(selectedSkill.id)) {
+        closeSkillDetail();
       }
+      if (result.deleted > 0) {
+        toast.success(t("mySkills.batchDeleted", { count: result.deleted }));
+      }
+      if (result.failed.length > 0) {
+        toast.error(t("mySkills.batchDeleteFailed", { count: result.failed.length }));
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, t("common.error")));
+    } finally {
+      exitMultiSelect();
+      setBatchDeleteConfirm(false);
+      await Promise.all([refreshManagedSkills(), refreshScenarios()]);
     }
-    if (deleted > 0) {
-      toast.success(t("mySkills.batchDeleted", { count: deleted }));
-    }
-    if (deleted < ids.length) {
-      toast.error(t("mySkills.batchDeleteFailed", { count: ids.length - deleted }));
-    }
-    exitMultiSelect();
-    setBatchDeleteConfirm(false);
-    await Promise.all([refreshManagedSkills(), refreshScenarios()]);
   };
 
   const handleBatchEditTags = async (adds: string[], removes: string[]) => {

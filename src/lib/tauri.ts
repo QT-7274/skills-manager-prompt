@@ -215,6 +215,14 @@ export const getSourceSkillDocument = (skillId: string) =>
 export const deleteManagedSkill = (skillId: string) =>
   invoke<void>("delete_managed_skill", { skillId });
 
+export interface BatchDeleteSkillsResult {
+  deleted: number;
+  failed: string[];
+}
+
+export const deleteManagedSkills = (skillIds: string[]) =>
+  invoke<BatchDeleteSkillsResult>("delete_managed_skills", { skillIds });
+
 export const installLocal = (sourcePath: string, name?: string) =>
   invoke<void>("install_local", { sourcePath, name: name || null });
 

@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tauri::State;
 use walkdir::WalkDir;
 
@@ -29,6 +29,12 @@ pub struct UpdateSkillResult {
 pub struct BatchUpdateSkillsResult {
     pub refreshed: usize,
     pub unchanged: usize,
+    pub failed: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchDeleteSkillsResult {
+    pub deleted: usize,
     pub failed: Vec<String>,
 }
 
@@ -327,13 +333,40 @@ pub async fn delete_managed_skill(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let skill = store
-            .get_skill_by_id(&skill_id)
-            .map_err(AppError::db)?
-            .ok_or_else(|| AppError::not_found("Skill not found"))?;
+        let result = delete_managed_skills_by_ids(&store, &[skill_id.clone()])?;
+        if result.deleted == 0 {
+            return Err(AppError::not_found("Skill not found"));
+        }
+        Ok(())
+    })
+    .await?
+}
 
-        sync_metadata::with_repo_lock("delete skill", || {
-            let targets = store.get_targets_for_skill(&skill_id)?;
+#[tauri::command]
+pub async fn delete_managed_skills(
+    skill_ids: Vec<String>,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<BatchDeleteSkillsResult, AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || delete_managed_skills_by_ids(&store, &skill_ids))
+        .await?
+}
+
+fn delete_managed_skills_by_ids(
+    store: &SkillStore,
+    skill_ids: &[String],
+) -> Result<BatchDeleteSkillsResult, AppError> {
+    sync_metadata::with_repo_lock("delete skills", || {
+        let mut deleted = 0;
+        let mut failed = Vec::new();
+
+        for skill_id in skill_ids {
+            let Some(skill) = store.get_skill_by_id(skill_id)? else {
+                failed.push(skill_id.clone());
+                continue;
+            };
+
+            let targets = store.get_targets_for_skill(skill_id)?;
             for target in &targets {
                 let target_path = PathBuf::from(&target.target_path);
                 sync_engine::remove_target(&target_path).ok();
@@ -344,14 +377,17 @@ pub async fn delete_managed_skill(
                 std::fs::remove_dir_all(&central).ok();
             }
 
-            store.delete_skill(&skill_id)?;
-            sync_metadata::write_all_from_db_unlocked(&store)
-        })
-        .map_err(AppError::db)?;
+            store.delete_skill(skill_id)?;
+            deleted += 1;
+        }
 
-        Ok(())
+        if deleted > 0 {
+            sync_metadata::write_all_from_db_unlocked(store)?;
+        }
+
+        Ok(BatchDeleteSkillsResult { deleted, failed })
     })
-    .await?
+    .map_err(AppError::db)
 }
 
 #[tauri::command]
@@ -1846,4 +1882,131 @@ fn remove_path_if_exists(path: &Path) -> Result<(), AppError> {
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::{tempdir, TempDir};
+
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct TestRepo {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _tmp: TempDir,
+        store: SkillStore,
+    }
+
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            central_repo::set_test_base_dir_override(None);
+        }
+    }
+
+    fn test_repo() -> TestRepo {
+        let lock = TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("repo");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+        fs::create_dir_all(central_repo::skills_dir()).unwrap();
+        let store = SkillStore::new(&base.join("test.db")).unwrap();
+        TestRepo {
+            _lock: lock,
+            _tmp: tmp,
+            store,
+        }
+    }
+
+    fn write_skill_dir(name: &str) -> PathBuf {
+        let dir = central_repo::skills_dir().join(name);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), format!("---\nname: {name}\n---\n")).unwrap();
+        dir
+    }
+
+    fn sample_skill(id: &str, name: &str, central_path: &Path) -> SkillRecord {
+        SkillRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            source_type: "import".to_string(),
+            source_ref: Some(central_path.to_string_lossy().to_string()),
+            source_ref_resolved: None,
+            source_subpath: None,
+            source_branch: None,
+            source_revision: None,
+            remote_revision: None,
+            central_path: central_path.to_string_lossy().to_string(),
+            content_hash: None,
+            enabled: true,
+            created_at: 1,
+            updated_at: 1,
+            status: "ok".to_string(),
+            update_status: "local_only".to_string(),
+            last_checked_at: None,
+            last_check_error: None,
+        }
+    }
+
+    #[test]
+    fn batch_delete_removes_skills_targets_and_stale_metadata_once() {
+        let repo = test_repo();
+        let skill_one_dir = write_skill_dir("skill-one");
+        let skill_two_dir = write_skill_dir("skill-two");
+        repo.store
+            .insert_skill(&sample_skill("skill-1", "skill-one", &skill_one_dir))
+            .unwrap();
+        repo.store
+            .insert_skill(&sample_skill("skill-2", "skill-two", &skill_two_dir))
+            .unwrap();
+
+        let target_dir = repo._tmp.path().join("target-skill-one");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("SKILL.md"), "# target").unwrap();
+        repo.store
+            .insert_target(&SkillTargetRecord {
+                id: "target-1".to_string(),
+                skill_id: "skill-1".to_string(),
+                tool: "cursor".to_string(),
+                target_path: target_dir.to_string_lossy().to_string(),
+                mode: "symlink".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+            })
+            .unwrap();
+
+        sync_metadata::write_all_from_db_unlocked(&repo.store).unwrap();
+        assert!(sync_metadata::metadata_dir()
+            .join("skills/skill-1.json")
+            .exists());
+        assert!(sync_metadata::metadata_dir()
+            .join("skills/skill-2.json")
+            .exists());
+
+        let result = delete_managed_skills_by_ids(
+            &repo.store,
+            &["skill-1".to_string(), "missing-skill".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(result.deleted, 1);
+        assert_eq!(result.failed, vec!["missing-skill".to_string()]);
+        assert!(repo.store.get_skill_by_id("skill-1").unwrap().is_none());
+        assert!(repo.store.get_skill_by_id("skill-2").unwrap().is_some());
+        assert!(!skill_one_dir.exists());
+        assert!(skill_two_dir.exists());
+        assert!(!target_dir.exists());
+        assert!(!sync_metadata::metadata_dir()
+            .join("skills/skill-1.json")
+            .exists());
+        assert!(sync_metadata::metadata_dir()
+            .join("skills/skill-2.json")
+            .exists());
+    }
 }
