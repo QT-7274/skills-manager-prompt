@@ -49,6 +49,10 @@ pub fn sync_mode_for_tool(_tool_key: &str, configured_mode: Option<&str>) -> Syn
 }
 
 pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMode> {
+    if is_target_current(source, target, mode) {
+        return Ok(mode);
+    }
+
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create parent dir {:?}", parent))?;
@@ -95,6 +99,45 @@ pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMo
             copy_dir_recursive(source, target)?;
             Ok(SyncMode::Copy)
         }
+    }
+}
+
+pub fn is_target_current(source: &Path, target: &Path, mode: SyncMode) -> bool {
+    match mode {
+        SyncMode::Symlink => symlink_points_to(target, source),
+        // Copy mode intentionally refreshes the target because there is no cheap
+        // metadata-backed freshness check for arbitrary skill directory contents.
+        SyncMode::Copy => false,
+    }
+}
+
+fn symlink_points_to(target: &Path, source: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(target) else {
+        return false;
+    };
+    if !metadata.file_type().is_symlink() {
+        return false;
+    }
+
+    let Ok(link_target) = std::fs::read_link(target) else {
+        return false;
+    };
+    let resolved_link_target = if link_target.is_absolute() {
+        link_target
+    } else {
+        target
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(link_target)
+    };
+
+    if resolved_link_target == source {
+        return true;
+    }
+
+    match (resolved_link_target.canonicalize(), source.canonicalize()) {
+        (Ok(link), Ok(src)) => link == src,
+        _ => false,
     }
 }
 
@@ -262,6 +305,27 @@ mod tests {
         sync_skill(&src, &tgt, SyncMode::Copy).unwrap();
         assert!(tgt.join("new.md").exists());
         assert!(!tgt.join("old.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_skill_symlink_skips_existing_correct_link() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("source");
+        let tgt = tmp.path().join("target");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "# hello").unwrap();
+        std::os::unix::fs::symlink(&src, &tgt).unwrap();
+
+        let before = fs::symlink_metadata(&tgt).unwrap().modified().unwrap();
+        let mode = sync_skill(&src, &tgt, SyncMode::Symlink).unwrap();
+
+        assert!(matches!(mode, SyncMode::Symlink));
+        assert_eq!(fs::read_link(&tgt).unwrap(), src);
+        assert_eq!(
+            fs::symlink_metadata(&tgt).unwrap().modified().unwrap(),
+            before
+        );
     }
 
     // ── copy_dir_recursive ──
