@@ -56,19 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.14.3] - 2026-04-21
 
-### Added
-- 
-
-### Changed
-- 
-
-### Fixed
-- 
-
-### Removed
-- 
-## [1.14.3] - 2026-04-21
-
 ### Changed
 - Improved text size scaling to keep the Settings page scrollable at all zoom levels
 
@@ -78,12 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added logging for Windows symlink fallback to aid troubleshooting
 
 ## [1.14.2] - 2026-04-21
-
-### Added
-- 
-
-### Changed
-- 
 
 ### Fixed
 - Avoid black screen when opening skill detail sheet on macOS

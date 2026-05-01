@@ -193,7 +193,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshAppData]);
 
   useEffect(() => {
-    const unlistenPromise = listen<string>("tray-scenario-switched", async () => {
+    const unlistenPromise = listen<string>("tray-scenario-switched", async (event) => {
+      setViewedScenarioId(event.payload);
       await Promise.all([refreshScenarios(), refreshManagedSkills()]);
     });
 
@@ -204,7 +205,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           console.error("Failed to unlisten tray-scenario-switched:", error);
         });
     };
-  }, [refreshManagedSkills, refreshScenarios]);
+  }, [refreshManagedSkills, refreshScenarios, setViewedScenarioId]);
 
   // Refresh skills after background file sync completes (targets updated)
   useEffect(() => {
