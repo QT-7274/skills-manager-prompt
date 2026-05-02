@@ -577,6 +577,7 @@ mod tests {
             description: None,
             icon: None,
             sort_order: 0,
+            prompt_template: None,
             created_at: 1,
             updated_at: 1,
         }

@@ -40,6 +40,10 @@
       "settings": {
         "title": "環境設定統一放在設定頁",
         "description": "在這裡檢查 Agent 路徑、加入自訂工具、切換同步模式、主題、字級、語言和預設場景，設定托盤、代理、Git 遠端、AI 搜尋 Key，並檢查應用更新。"
+      },
+      "workflows": {
+        "title": "推荐工作流",
+        "description": "单 Agent 用户：安装 Skill → 点「应用到默认」。可以忽略标签和项目工作区。多项目用户：给 Skill 打标签（如「前端」「调试」），在项目页点「添加 Skill」并按标签筛选，一次推送一组同类 Skill。多机用户：在设置页开启 Git 备份，把中央仓库在多台设备间同步。"
       }
     }
   },
@@ -175,7 +179,25 @@
       "relinked": "已重新關聯原路徑",
       "detachSource": "轉為本機副本",
       "detachedSource": "已取消原路徑追蹤",
-      "alreadyUpToDate": "Skill 內容未變化（版本已同步）"
+      "alreadyUpToDate": "Skill 內容未變化（版本已同步）",
+      "findOnline": "尋找線上版本",
+      "convertedToOnline": "已轉換為線上來源",
+      "searchingOnline": "正在搜尋線上版本...",
+      "selectOnlineVersion": "為 \"{{name}}\" 選擇線上版本",
+      "noOnlineMatches": "未找到匹配的線上 Skill",
+      "matchSimilarity": "匹配度: {{percent}}%",
+      "installCount": "{{count}} 次安裝",
+      "confirmConvert": "安裝此版本",
+      "convertWarning": "選擇後將用線上版本替換已匯入的檔案，來源類型將變更為 '{{type}}'。",
+      "originSkillssh": "skills.sh",
+      "originSkillsmp": "SkillsMP",
+      "batchConvertTitle": "批量轉換匯入的 Skill ({{count}} 個)",
+      "batchConvert": "全部轉換",
+      "batchConvertSuccess": "已成功轉換 {{count}} 個 Skill 為線上來源",
+      "batchConvertPartialFail": "{{count}} 個 Skill 轉換失敗",
+      "noImportSkillsWithMatches": "未找到有線上匹配的匯入 Skill",
+      "autoSelectBest": "自動選擇最佳",
+      "selectFromMatches": "選擇一個匹配的版本"
     },
     "gitConfigEntry": "同步設定",
     "filters": {
@@ -216,7 +238,87 @@
     "batchEnable": "啟用 {{count}} 個",
     "batchDisable": "停用 {{count}} 個",
     "batchEnabled": "已啟用 {{count}} 個 Skill",
-    "batchDisabled": "已停用 {{count}} 個 Skill"
+    "batchDisabled": "已停用 {{count}} 個 Skill",
+    "promptEditor": {
+      "button": "Prompt 編輯",
+      "title": "Prompt 編輯器",
+      "placeholder": "在此輸入 Prompt 文字，點擊左側 Skill 的箭頭按鈕插入到游標位置...",
+      "dragHint": "點擊箭頭按鈕插入 Skill 到編輯區",
+      "used": "已插入",
+      "save": "儲存範本",
+      "saved": "Prompt 範本已儲存",
+      "copy": "複製 Prompt",
+      "copied": "已複製到剪貼簿",
+      "exit": "退出編輯",
+      "preview": "預覽",
+      "emptySkills": "目前場景沒有已啟用的 Skills",
+      "dropZone": "將 Skill 拖曳到此處"
+    },
+    "recipes": {
+      "title": "Recipes",
+      "newRecipe": "新建 Recipe",
+      "namePlaceholder": "Recipe 名稱",
+      "deleteConfirm": "確定要刪除 Recipe「{{name}}」嗎？",
+      "deleted": "Recipe 已刪除",
+      "created": "Recipe 已建立",
+      "updated": "Recipe 已更新",
+      "skillSubset": "Recipe Skills（子集）",
+      "skillSubsetHint": "勾選此 Recipe 使用的 Skills",
+      "noRecipes": "尚無 Recipe，點擊上方按鈕建立",
+      "scenarioPrompt": "場景預設 Prompt",
+      "recipePrompt": "Recipe Prompt"
+    },
+    "aiTagging": "AI 打標籤",
+    "aiTaggingLoading": "分析中...",
+    "aiTaggingSuccess": "標籤生成成功",
+    "aiTaggingError": "標籤生成失敗",
+    "aiTaggingConfirm": "套用這些標籤？",
+    "aiTaggingNoApiKey": "請先在設定中配置預設 AI Provider",
+    "batchAiTag": "AI 打標籤 ({{count}})",
+    "batchAiTagAll": "AI 全部打標籤",
+    "batchTaggingProgress": "正在打標籤 {{current}}/{{total}}...",
+    "batchTaggingSuccess": "成功為 {{count}} 個技能生成標籤",
+    "batchTaggingFailed": "{{count}} 個技能標籤生成失敗",
+    "consolidatingTags": "正在整理標籤...",
+    "aiGeneratePrompt": "AI 生成",
+    "aiGeneratePromptLoading": "生成中...",
+    "aiGeneratePromptSuccess": "Prompt 生成成功",
+    "aiGeneratePromptError": "Prompt 生成失敗",
+    "aiGeneratePromptWithRecipes": "Prompt 已更新。已建立 {{created}} 個 recipe，{{skipped}} 個跳過（重複）。",
+    "applyToDefault": "应用到默认",
+    "applied": "已应用",
+    "notAppliedYet": "尚未应用",
+    "appliedToast": "已应用",
+    "applyMissingDefault": "没有可用的 Agent — 应用至少需要一个目标位置。",
+    "defaultLocationMissing": "默认目标位置缺失",
+    "openLocationSettings": "打开设置",
+    "applyCallout": "点击场景现在只是打开浏览，需要点击「应用到默认」才会同步到 Agent。",
+    "sourceType": "来源类型",
+    "sourceResolved": "解析后来源",
+    "sourceBranch": "分支",
+    "sourceSubpath": "子路径",
+    "sourceRevision": "版本",
+    "docTabs": {
+      "local": "本地",
+      "diff": "差异",
+      "source": "来源"
+    },
+    "sourceDiffUnavailable": "暂时无法读取来源版本内容",
+    "agentToggleEnabled": "{{agent}} 已开启",
+    "agentToggleDisabled": "{{agent}} 已关闭",
+    "batchEditTags": "标签 ({{count}})",
+    "batchTagsUpdated": "已更新 {{count}} 个 Skill 的标签",
+    "batchTagsFailed": "{{count}} 个 Skill 标签更新失败",
+    "batchTagDialog": {
+      "title": "为 {{count}} 个 Skill 编辑标签",
+      "currentTags": "当前标签（点击标记移除）",
+      "toAdd": "添加新标签",
+      "noTags": "选中的 Skill 暂无标签",
+      "apply": "应用",
+      "addButton": "添加",
+      "clickToRemove": "点击标记为移除",
+      "undoRemove": "点击保留此标签"
+    }
   },
   "install": {
     "title": "安裝 Skills",
@@ -291,7 +393,7 @@
     "aiSearchButton": "AI 搜尋",
     "aiSearchToggle": "AI 搜尋（SkillsMP）",
     "onlyThisContributor": "僅看該貢獻者",
-    "gitReinstall": "重新安裝並更新",
+    "gitReinstall": "重新安裝",
     "installClone": "安裝並複製",
     "scan": {
       "title": "掃描本機 Skills 並匯入",
@@ -315,6 +417,15 @@
         "pending": "待匯入",
         "imported": "已匯入"
       }
+    },
+    "gitPreview": {
+      "title": "选择要导入的技能",
+      "description": "从仓库中发现了以下技能，可自定义名称后导入。",
+      "selectAll": "全选",
+      "deselectAll": "取消全选",
+      "namePlaceholder": "技能名称",
+      "confirm": "导入选中项",
+      "empty": "未发现可导入的技能"
     }
   },
   "settings": {
@@ -478,7 +589,54 @@
     "gitErrorRejected": "遠端有新的更新，需要先合併後再同步。",
     "gitErrorUnrelatedHistories": "本機倉庫與遠端倉庫歷史不一致。請打開「修復同步設定」選擇處理方式。",
     "gitErrorNoUpstream": "尚未建立遠端追蹤關係。請打開「修復同步設定」處理。",
-    "gitErrorGeneric": "Git 操作失敗，請檢查設定中的遠端倉庫位址後重試。"
+    "gitErrorGeneric": "Git 操作失敗，請檢查設定中的遠端倉庫位址後重試。",
+    "syncScope": "同步範圍",
+    "syncScopeDesc": "場景獨佔模式下，切換場景將同步切換 Agent 可用的 Skills；全域通用模式下，所有 Skills 始終同步至全部 Agent，場景僅用於 Prompt 管理。",
+    "syncScope_scenario": "場景獨佔",
+    "syncScope_global": "全域通用",
+    "aiConfigTitle": "AI 設定",
+    "aiDefaultProvider": "預設 Provider",
+    "aiDefaultProviderDesc": "用於 AI 打標籤、標籤歸併、場景建立和 Prompt 生成。",
+    "aiProviderCodebuddy": "CodeBuddy",
+    "aiProviderOpenaiCompatible": "OpenAI 相容",
+    "codebuddyTitle": "CodeBuddy",
+    "codebuddyApiKey": "CodeBuddy API Key",
+    "codebuddyDesc": "輸入 CodeBuddy API Key 以啟用 AI 功能。",
+    "codebuddyApiKeyDesc": "輸入 CodeBuddy API Key 以啟用 AI 功能（自動打標籤、場景生成等）。",
+    "codebuddyGetKey": "取得 API Key",
+    "codebuddyApiKeyPlaceholder": "API key...",
+    "codebuddyEnv": "環境",
+    "codebuddyEnvDesc": "選擇 CodeBuddy 部署環境。",
+    "codebuddyEnvAuto": "自動（海外）",
+    "codebuddyEnvInternal": "中國大陸（copilot.tencent.com）",
+    "codebuddyEnvIoa": "iOA（tencent.sso.copilot.tencent.com）",
+    "openaiCompatibleTitle": "OpenAI 相容",
+    "openaiCompatibleDesc": "使用 API Key 接入任意相容 chat completions 的端點。",
+    "openaiBaseUrl": "Base URL",
+    "openaiApiKey": "API Key",
+    "openaiModel": "模型",
+    "openaiTemperature": "Temperature",
+    "openaiMaxTokens": "Max Tokens",
+    "proxyConfig": "网络代理",
+    "proxyUrl": "代理地址",
+    "proxyUrlDesc": "设置后，所有 Git 拉取和网络请求均通过此代理出口。留空则直连。",
+    "proxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "proxyUrlSaved": "代理设置已保存",
+    "proxyUrlInvalid": "代理地址必须以 http://、https:// 或 socks5:// 开头",
+    "closeAction": "关闭行为",
+    "closeActionDesc": "选择点击窗口关闭按钮后的应用行为。",
+    "closeAction_ask": "每次询问",
+    "closeAction_hide": "最小化到托盘",
+    "closeAction_close": "退出应用",
+    "trayIcon": "托盘图标",
+    "trayIconDesc": "在系统托盘中显示图标，便于快速执行显示和退出操作。",
+    "trayIcon_on": "显示",
+    "trayIcon_off": "隐藏",
+    "trayIconOffHint": "托盘图标已隐藏，关闭窗口时将直接退出应用。",
+    "developerMode": "开发者模式",
+    "developerModeDesc": "在通知中显示详细的错误信息，方便调试。",
+    "developerMode_on": "开启",
+    "developerMode_off": "关闭"
   },
   "common": {
     "loading": "載入中...",
@@ -498,7 +656,10 @@
     "rename": "重新命名",
     "save": "儲存",
     "create": "建立",
-    "goToSettings": "設定"
+    "goToSettings": "設定",
+    "close": "關閉",
+    "refresh": "重新整理",
+    "search": "搜索"
   },
   "scenario": {
     "create": "新增場景",
@@ -511,7 +672,17 @@
     "renamed": "場景已重新命名",
     "deleted": "場景已刪除",
     "created": "場景已建立",
-    "switched": "已切換到「{{name}}」"
+    "switched": "已切換到「{{name}}」",
+    "aiCreateScenario": "AI 建立",
+    "aiCreateScenarioLoading": "分析技能中...",
+    "aiCreateScenarioSuccess": "場景建立成功",
+    "aiCreateScenarioError": "場景建立失敗",
+    "aiCreateScenarioConfirm": "AI 建議以下場景分組，請確認：",
+    "aiCreateScenarioEmpty": "未生成場景建議",
+    "untaggedWarningTitle": "大量技能未打標籤",
+    "untaggedWarningMessage": "超過半數的技能還沒有標籤。AI 會根據標籤來分組——建議先打標籤以獲得更準確的場景分組。",
+    "goTagFirst": "先打標籤",
+    "continueAnyway": "仍然繼續"
   },
   "project": {
     "title": "專案 Skills",
@@ -624,6 +795,22 @@
     "batchUpdateProjectFailed": "{{count}} 個 Skill 更新到專案失敗",
     "batchEditTags": "標籤 ({{count}})",
     "batchTagsUpdated": "已更新 {{count}} 個中心 Skill 的標籤",
-    "batchTagsFailed": "{{count}} 個中心 Skill 標籤更新失敗"
+    "batchTagsFailed": "{{count}} 個中心 Skill 標籤更新失敗",
+    "addSkill": "添加 Skill",
+    "addSkillsCta": "从中央仓库添加 Skill",
+    "addSkillsToProject": "添加 Skill 到项目",
+    "addCallout": "也支持批量添加：在「添加 Skill」弹窗里按 tag 筛选，可一次推送一组同类 Skill。",
+    "exportTagFilterLabel": "按标签筛选:",
+    "exportTagFilterHint": "选择一个或多个标签可批量添加同类 Skill（如「前端」+「调试」）。",
+    "docTabs": {
+      "center": "中心"
+    }
+  },
+  "closeAction": {
+    "title": "关闭行为",
+    "message": "最小化到托盘后，应用仍会在后台运行，你可以从系统托盘图标重新打开。",
+    "close": "退出应用",
+    "hide": "最小化到托盘",
+    "remember": "记住我的选择，下次不再提示"
   }
 }

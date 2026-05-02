@@ -85,8 +85,17 @@ fn collect_watch_paths_for_adapters(
                 if let Some(parent) = skills_dir.parent() {
                     paths.push(parent.to_path_buf());
                 }
-                paths.push(skills_dir);
-                paths.push(disabled_dir);
+                // Only watch leaf dirs that actually contain skills. Watching empty
+                // leaf dirs holds OS handles (Windows ReadDirectoryChangesW) and
+                // prevents users from deleting the agent-config folder (e.g. .codex)
+                // after removing all skills. Newly-populated dirs are picked up via
+                // the parent watch above.
+                if dir_has_entries(&skills_dir) {
+                    paths.push(skills_dir);
+                }
+                if dir_has_entries(&disabled_dir) {
+                    paths.push(disabled_dir);
+                }
             }
         }
     }
@@ -103,6 +112,12 @@ fn watch_target(path: &Path) -> Option<PathBuf> {
     path.parent()
         .filter(|parent| parent.exists())
         .map(|parent| parent.to_path_buf())
+}
+
+fn dir_has_entries(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut iter| iter.next().is_some())
+        .unwrap_or(false)
 }
 
 fn sync_watch_set(
@@ -249,6 +264,7 @@ mod tests {
             additional_scan_dirs: vec![noisy_scan_dir.to_string_lossy().to_string()],
             override_skills_dir: Some(primary_dir.to_string_lossy().to_string()),
             is_custom: true,
+            recursive_scan: false,
         }];
 
         let paths = collect_watch_paths_for_adapters(&store, adapters);

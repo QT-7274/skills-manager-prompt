@@ -935,7 +935,6 @@ pub async fn batch_update_skills(
     .await?
 }
 
-
 #[tauri::command]
 pub async fn detach_local_skill_source(
     skill_id: String,
@@ -1050,46 +1049,6 @@ pub async fn relink_local_skill_source(
                 Err(e)
             }
         }
-    })
-    .await?
-}
-
-#[tauri::command]
-pub async fn detach_local_skill_source(
-    skill_id: String,
-    store: State<'_, Arc<SkillStore>>,
-) -> Result<ManagedSkillDto, AppError> {
-    let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let skill = store
-            .get_skill_by_id(&skill_id)
-            .map_err(AppError::db)?
-            .ok_or_else(|| AppError::not_found("Skill not found"))?;
-
-        if !matches!(skill.source_type.as_str(), "local" | "import") {
-            return Err(AppError::invalid_input(
-                "Only local skills can detach source paths",
-            ));
-        }
-
-        store
-            .update_skill_after_reinstall(
-                &skill.id,
-                &skill.name,
-                skill.description.as_deref(),
-                &skill.source_type,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                skill.content_hash.as_deref(),
-                "local_only",
-            )
-            .map_err(AppError::db)?;
-
-        managed_skill_by_id(&store, &skill_id)
     })
     .await?
 }

@@ -166,9 +166,6 @@ pub fn sync_skill_fast(source: &Path, target: &Path, mode: SyncMode) -> Result<S
             copy_dir_recursive(source, target)?;
             Ok(SyncMode::Copy)
         }
-            copy_dir_recursive(source, target)?;
-            Ok(SyncMode::Copy)
-        }
     }
 }
 

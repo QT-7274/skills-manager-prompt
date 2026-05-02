@@ -35,6 +35,17 @@
 <p align="center"><strong>Code Diff</strong></p>
 <p align="center"><img src="assets/CleanShot_20260419_003613@2x.png" width="800" alt="Code Diff" /></p>
 
+## QT Fork Additions
+
+This [QT-7274 fork](https://github.com/QT-7274/skills-manager-prompt) extends upstream with the following capabilities:
+
+- **AI assistance** — Pluggable AI provider (CodeBuddy SDK / any OpenAI-compatible endpoint). AI-generated tags, batch tagging across the whole library, AI-generated scenario prompts, and AI-generated recipes that bundle skills into ready-to-run workflow phases.
+- **Scenario prompt & recipes** — Edit a prompt template per scenario, then decompose it into Recipes (named sub-prompts tied to specific skill subsets). One-click copy a recipe's rendered prompt for use in any agent chat.
+- **Global vs. scenario sync scope** — Choose whether skill sync follows the active scenario or applies globally across all managed skills. Switch modes in Settings without re-importing anything.
+- **Bulk update & online match** — Batch "Update All" over Git/skills.sh skills with backend-side parallel updates. For local-imported skills, find the matching online version and convert them into trackable online sources.
+- **sm-tui terminal UI** — A lightweight terminal companion for browsing scenarios, copying recipe prompts, and triggering sync — keyboard (arrow/hjkl) and mouse both supported.
+- **Project workspace extras** — Empty project initialization flow, tag-filtered batch export, per-agent assignment while exporting, and an "Add Skills to Project" primary CTA that makes seeding a new project one click.
+
 ## Features
 
 - **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skills-manager` and can be customized in **Settings**.

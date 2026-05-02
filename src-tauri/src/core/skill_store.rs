@@ -1281,66 +1281,6 @@ impl SkillStore {
         Ok(())
     }
 
-    /// Batch ensure defaults for multiple skills in a single transaction.
-    pub fn ensure_scenario_skill_tool_defaults_batch(
-        &self,
-        scenario_id: &str,
-        skill_ids: &[String],
-        tools: &[String],
-    ) -> Result<()> {
-        if skill_ids.is_empty() || tools.is_empty() {
-            return Ok(());
-        }
-        let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-        let now = chrono::Utc::now().timestamp_millis();
-        for skill_id in skill_ids {
-            for tool in tools {
-                tx.execute(
-                    "INSERT OR IGNORE INTO scenario_skill_tools (scenario_id, skill_id, tool, enabled, updated_at) \
-                     VALUES (?1, ?2, ?3, 1, ?4)",
-                    params![scenario_id, skill_id, tool, now],
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Batch query: for each skill in a scenario, return which tools are enabled.
-    pub fn get_enabled_tools_for_scenario_skills_batch(
-        &self,
-        scenario_id: &str,
-        skill_ids: &[String],
-    ) -> Result<HashMap<String, Vec<String>>> {
-        if skill_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<String> = (2..=skill_ids.len() + 1)
-            .map(|i| format!("?{i}"))
-            .collect();
-        let sql = format!(
-            "SELECT skill_id, tool FROM scenario_skill_tools \
-             WHERE scenario_id = ?1 AND enabled = 1 AND skill_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let mut all_params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(1 + skill_ids.len());
-        all_params.push(&scenario_id as &dyn rusqlite::ToSql);
-        for sid in skill_ids {
-            all_params.push(sid as &dyn rusqlite::ToSql);
-        }
-        let rows = stmt.query_map(all_params.as_slice(), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        for row in rows.filter_map(|r| r.ok()) {
-            map.entry(row.0).or_default().push(row.1);
-        }
-        Ok(map)
-    }
-
     // ── Skill Tags ──
 
     pub fn get_all_tags(&self) -> Result<Vec<String>> {

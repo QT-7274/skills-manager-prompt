@@ -20,6 +20,17 @@
 |:-----------:|:----------:|
 | <img src="assets/CleanShot_20260312_234539@2x.png" width="400" alt="我的 Skills" /> | <img src="assets/CleanShot_20260312_234613@2x.png" width="400" alt="项目 Skills" /> |
 
+## QT Fork 新增功能
+
+本 [QT-7274 fork](https://github.com/QT-7274/skills-manager-prompt) 在上游基础上追加了以下能力：
+
+- **AI 辅助** — 可插拔的 AI Provider（CodeBuddy SDK / 任意 OpenAI 兼容接口）。支持 AI 生成标签、全库批量打标签、AI 生成场景 Prompt，以及 AI 生成 Recipe 把 Skills 编排成可直接执行的工作流阶段。
+- **场景 Prompt 与 Recipe** — 每个场景维护一个 Prompt 模板，并可拆分成 Recipe（绑定特定 Skill 子集的命名子 Prompt）。一键复制渲染后的 Recipe Prompt，贴到任意 Agent 对话即可用。
+- **全局 / 场景同步范围** — 在设置中切换"同步范围"：沿用当前场景同步，或对所有托管 Skills 全局同步。切换无需重新导入。
+- **批量更新与线上匹配** — 对 Git/skills.sh 来源的 Skills 批量执行"全部更新"，后端并行处理。对本地导入的 Skills，可查找对应线上版本并转换为可追踪的在线来源。
+- **sm-tui 终端 UI** — 轻量终端伴侣，用于浏览场景、复制 Recipe Prompt 并触发同步，支持键盘（方向键 / hjkl）和鼠标操作。
+- **项目工作区增强** — 支持空项目初始化流程、按标签筛选的批量导出、导出时按 Agent 分配，并把"添加 Skills 到项目"作为主入口 CTA，一键即可为新项目铺设基础。
+
 ## 功能
 
 - **统一技能库** — 从 Git 仓库、本地目录、`.zip` / `.skill` 文件或 [skills.sh](https://skills.sh) 市场安装技能，统一存放在 `~/.skills-manager`。

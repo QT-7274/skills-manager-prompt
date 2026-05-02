@@ -59,17 +59,6 @@ const MAINSTREAM_AGENT_KEYS = new Set([
 
 type AiProvider = "codebuddy" | "openai_compatible";
 
-function applyTextSize(size: string) {
-  document.documentElement.style.zoom = TEXT_SIZE_ZOOM_MAP[size] || "1";
-}
-
-function compactHomePath(path: string) {
-  return path
-    .replace(/\/Users\/[^/]+/, "~")
-    .replace(/\/home\/[^/]+/, "~")
-    .replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
-}
-
 function compactHomePath(path: string) {
   return path
     .replace(/\/Users\/[^/]+/, "~")
