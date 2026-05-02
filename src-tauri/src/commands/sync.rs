@@ -253,7 +253,7 @@ pub async fn set_skill_tool_toggle(
             store.set_scenario_skill_tool_enabled(&scenario_id, &skill_id, &tool, enabled)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         let is_active = store
             .get_active_scenario_id()

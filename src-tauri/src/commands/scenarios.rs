@@ -232,7 +232,7 @@ pub async fn create_scenario(
             store.insert_scenario(&record)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         if let Some(previous_id) = previous_active_id.as_deref() {
             unsync_scenario_skills(&store, previous_id)?;
@@ -272,7 +272,7 @@ pub async fn update_scenario(
             store.update_scenario(&id, &name, description.as_deref(), icon.as_deref())?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)
+        .map_err(AppError::io)
     })
     .await?;
     if result.is_ok() {
@@ -303,7 +303,7 @@ pub async fn delete_scenario(
             store.delete_scenario(&id)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         if was_active {
             let remaining = store.get_all_scenarios().map_err(AppError::db)?;
@@ -422,7 +422,7 @@ pub async fn add_skill_to_scenario(
             store.add_skill_to_scenario(&scenario_id, &skill_id)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         // If this is the active scenario AND not in global sync scope, sync the skill
         let is_global = store
@@ -456,7 +456,7 @@ pub async fn remove_skill_from_scenario(
             store.remove_skill_from_scenario(&scenario_id, &skill_id)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)?;
+        .map_err(AppError::io)?;
 
         // If this is the active scenario AND not in global sync scope, unsync the skill
         let is_global = store
@@ -505,7 +505,7 @@ pub async fn reorder_scenarios(
             store.reorder_scenarios(&ids)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)
+        .map_err(AppError::io)
     })
     .await?;
     if result.is_ok() {
@@ -540,7 +540,7 @@ pub async fn reorder_scenario_skills(
             store.reorder_scenario_skills(&scenario_id, &skill_ids)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
-        .map_err(AppError::db)
+        .map_err(AppError::io)
     })
     .await?
 }
@@ -672,7 +672,9 @@ fn unsync_obsolete_scenario_targets(
         .get_skill_ids_for_scenario(old_scenario_id)
         .map_err(AppError::db)?;
     for skill_id in &old_skill_ids {
-        let targets = store.get_targets_for_skill(skill_id).unwrap_or_default();
+        let targets = store
+            .get_targets_for_skill(skill_id)
+            .map_err(AppError::db)?;
         for target in &targets {
             let path = PathBuf::from(&target.target_path);
             let key = (skill_id.clone(), target.tool.clone());

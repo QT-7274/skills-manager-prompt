@@ -416,7 +416,7 @@ fn delete_managed_skills_by_ids(
 
         Ok(BatchDeleteSkillsResult { deleted, failed })
     })
-    .map_err(AppError::db)
+    .map_err(AppError::io)
 }
 
 #[tauri::command]
@@ -440,7 +440,7 @@ pub async fn install_local(
             update_status: "local_only".to_string(),
         };
         let _lock = RepoLock::acquire(&central_repo::skills_dir(), "install local skill")
-            .map_err(AppError::db)?;
+            .map_err(AppError::io)?;
         let result = installer::install_from_local(&path, name.as_deref()).map_err(AppError::io)?;
         store_installed_skill_unlocked(&store, &result, &metadata, active.as_deref())?;
 
@@ -507,7 +507,7 @@ pub async fn install_git(
         emit_progress("installing");
         let install_result = (|| -> Result<(), AppError> {
             let _lock = RepoLock::acquire(&central_repo::skills_dir(), "install git skill")
-                .map_err(AppError::db)?;
+                .map_err(AppError::io)?;
             let active = store.get_active_scenario_id().ok().flatten();
             let skill_dir = resolve_skill_dir(&temp_dir, parsed.subpath.as_deref(), None)?;
             let revision = git_fetcher::get_head_revision(&temp_dir).map_err(AppError::git)?;
@@ -595,7 +595,7 @@ pub async fn install_from_skillssh(
         emit_progress("installing");
         let install_result = (|| -> Result<(), AppError> {
             let _lock = RepoLock::acquire(&central_repo::skills_dir(), "install skillssh skill")
-                .map_err(AppError::db)?;
+                .map_err(AppError::io)?;
             let active = store.get_active_scenario_id().ok().flatten();
             let skill_dir = resolve_skill_dir(&temp_dir, None, Some(&skill_id))?;
             let revision = git_fetcher::get_head_revision(&temp_dir).map_err(AppError::git)?;
@@ -744,7 +744,7 @@ pub async fn confirm_git_install(
             let revision = git_fetcher::get_head_revision(&temp_path).map_err(AppError::git)?;
             let active = store.get_active_scenario_id().ok().flatten();
             let _lock = RepoLock::acquire(&central_repo::skills_dir(), "confirm git install")
-                .map_err(AppError::db)?;
+                .map_err(AppError::io)?;
 
             for dir in &all_dirs {
                 let dir_name_entry = dir
@@ -955,7 +955,7 @@ pub async fn detach_local_skill_source(
 
         {
             let _lock = RepoLock::acquire(&central_repo::skills_dir(), "detach local skill")
-                .map_err(AppError::db)?;
+                .map_err(AppError::io)?;
             store
                 .update_skill_after_reinstall(
                     &skill.id,
@@ -1176,7 +1176,7 @@ fn update_git_skill_internal(
         let content_changed = skill.content_hash.as_deref() != Some(new_hash.as_str());
         let source_subpath = git_fetcher::relative_subpath(&temp_dir, &skill_dir);
         let _lock = RepoLock::acquire(&central_repo::skills_dir(), "update installed skill")
-            .map_err(AppError::db)?;
+            .map_err(AppError::io)?;
 
         if content_changed {
             let staged_path = staged_path_for(&skill.central_path);
@@ -1285,7 +1285,7 @@ fn reimport_local_skill_internal(
 
     let result = (|| -> Result<(), AppError> {
         let _lock = RepoLock::acquire(&central_repo::skills_dir(), "reimport local skill")
-            .map_err(AppError::db)?;
+            .map_err(AppError::io)?;
         let staged_path = staged_path_for(&skill.central_path);
         let install_result =
             installer::install_from_local_to_destination(&path, Some(&skill.name), &staged_path)
@@ -1787,7 +1787,7 @@ pub async fn set_skill_tags(
             store.set_tags_for_skill(&skill_id, &tags)?;
             sync_metadata::ensure_skill_metadata_unlocked(&store, &skill_id)
         })
-        .map_err(AppError::db)
+        .map_err(AppError::io)
     })
     .await?
 }
@@ -1876,7 +1876,7 @@ pub async fn batch_import_folder(
 
             let install_result = (|| -> Result<String, AppError> {
                 let _lock = RepoLock::acquire(&central_repo::skills_dir(), "batch import skill")
-                    .map_err(AppError::db)?;
+                    .map_err(AppError::io)?;
                 let result =
                     installer::install_from_local(dir, Some(&name)).map_err(AppError::io)?;
                 let metadata = InstallSourceMetadata {

@@ -59,6 +59,13 @@ pub fn parse_git_source(url: &str) -> ParsedGitSource {
 /// including `file://`, `ext::`, bare local paths, and UNC paths.
 pub fn validate_git_url(url: &str) -> Result<()> {
     let trimmed = url.trim();
+
+    // Reject leading-dash inputs: system git treats such positional arguments as
+    // options, enabling CLI option injection (e.g., `--upload-pack=...`).
+    if trimmed.starts_with('-') {
+        anyhow::bail!("URL must not start with '-'");
+    }
+
     let lower = trimmed.to_lowercase();
 
     // Explicitly allowed schemes
@@ -441,6 +448,7 @@ pub fn clone_repo_ref_with_progress(
     }
     command.arg("--progress"); // Force progress output to stderr.
     let child = command
+        .arg("--")
         .arg(url)
         .arg(&cached_dir)
         .stdout(Stdio::null())
@@ -757,7 +765,7 @@ fn resolve_remote_revision_with_git(
         cmd.arg("-c").arg(format!("https.proxy={proxy}"));
     }
     let output = cmd
-        .args(["ls-remote", url, &target])
+        .args(["ls-remote", "--", url, &target])
         .output()
         .with_context(|| format!("Failed to query remote {}", url))?;
 
@@ -842,6 +850,23 @@ mod tests {
         let parsed = parse_git_source("http://gitlab.example.com/repo.git");
         assert_eq!(parsed.clone_url, "http://gitlab.example.com/repo.git");
         assert_eq!(parsed.branch, None);
+    }
+
+    // ── validate_git_url ──
+
+    #[test]
+    fn validate_git_url_rejects_leading_dash() {
+        assert!(validate_git_url("-upload-pack=./payload").is_err());
+        assert!(validate_git_url("--config=core.sshCommand=./x").is_err());
+        assert!(validate_git_url("   --foo").is_err());
+    }
+
+    #[test]
+    fn validate_git_url_accepts_valid_schemes() {
+        assert!(validate_git_url("https://github.com/acme/repo.git").is_ok());
+        assert!(validate_git_url("ssh://git@host/repo").is_ok());
+        assert!(validate_git_url("git@github.com:acme/repo.git").is_ok());
+        assert!(validate_git_url("acme/repo").is_ok());
     }
 
     // ── find_skill_dir ──

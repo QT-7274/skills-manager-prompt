@@ -203,9 +203,9 @@ pub(crate) fn set_remote_unlocked(skills_dir: &Path, url: &str) -> Result<()> {
 
     let has_remote = run_git(skills_dir, &["remote", "get-url", "origin"]).is_ok();
     if has_remote {
-        run_git_checked(skills_dir, &["remote", "set-url", "origin", url])?;
+        run_git_checked(skills_dir, &["remote", "set-url", "origin", "--", url])?;
     } else {
-        run_git_checked(skills_dir, &["remote", "add", "origin", url])?;
+        run_git_checked(skills_dir, &["remote", "add", "origin", "--", url])?;
     }
 
     // Fetch remote to set up tracking
@@ -581,6 +581,7 @@ pub(crate) fn clone_into_unlocked(skills_dir: &Path, url: &str) -> Result<()> {
     // Clone
     let status = git_command()
         .arg("clone")
+        .arg("--")
         .arg(url)
         .arg(skills_dir)
         .stdout(std::process::Stdio::null())
