@@ -14,6 +14,7 @@ import {
   GitBranch,
   History,
   ArrowUpCircle,
+  Wrench,
   Loader2,
   X,
   Send,
@@ -40,7 +41,12 @@ import { SkillDetailPanel } from "../components/SkillDetailPanel";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { ScenarioPromptEditor, extractUsedSkillNames } from "../components/ScenarioPromptEditor";
 import type { ScenarioPromptEditorHandle } from "../components/ScenarioPromptEditor";
+import { BatchTagDialog } from "../components/BatchTagDialog";
+import { GitSetupDialog } from "../components/GitSetupDialog";
+import { GitRecoveryDialog } from "../components/GitRecoveryDialog";
+import { SyncDots } from "../components/SyncDots";
 import * as api from "../lib/tauri";
+import { getTagActiveColor, getTagColor } from "../lib/skillTags";
 import type {
   ManagedSkill,
   ToolInfo,
@@ -166,6 +172,7 @@ export function MySkills() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const refreshAfterDeleteRef = useRef<number | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
+  const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
@@ -177,6 +184,7 @@ export function MySkills() {
   const [batchMatchItems, setBatchMatchItems] = useState<BatchMatchItem[]>([]);
   const [batchSearching, setBatchSearching] = useState(false);
   const [batchConverting, setBatchConverting] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
   const [toolToggles, setToolToggles] = useState<SkillToolToggle[] | null>(null);
   const [togglingToolKey, setTogglingToolKey] = useState<string | null>(null);
   const [gitStatus, setGitStatus] = useState<GitBackupStatus | null>(null);
@@ -187,6 +195,8 @@ export function MySkills() {
   const [gitVersions, setGitVersions] = useState<GitBackupVersion[]>([]);
   const [restoreVersionTag, setRestoreVersionTag] = useState<string | null>(null);
   const [restoringVersionTag, setRestoringVersionTag] = useState<string | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [tagEditSkillId, setTagEditSkillId] = useState<string | null>(null);
   const [aiTaggingSkillId, setAiTaggingSkillId] = useState<string | null>(null);
   const [batchTagging, setBatchTagging] = useState(false);
@@ -395,12 +405,10 @@ export function MySkills() {
     const kind = getErrorKind(error);
     const message = getErrorMessage(error, "");
 
-    // Use structured kind for high-level classification
     if (kind === "network") {
       return t("settings.gitErrorNetwork");
     }
 
-    // Fall back to message-based matching for git-specific sub-categories
     if (
       message.includes("Authentication failed")
       || message.includes("Permission denied")
@@ -416,6 +424,21 @@ export function MySkills() {
     ) {
       return t("settings.gitErrorNetwork");
     }
+    // Order matters: check specific reject reasons before the generic conflict keyword.
+    if (message.includes("unrelated histories") || message.includes("refusing to merge")) {
+      return t("settings.gitErrorUnrelatedHistories");
+    }
+    if (
+      message.includes("[rejected]")
+      || message.includes("non-fast-forward")
+      || message.includes("fetch first")
+      || message.includes("failed to push some refs")
+    ) {
+      return t("settings.gitErrorRejected");
+    }
+    if (message.includes("no upstream") || message.includes("has no upstream branch")) {
+      return t("settings.gitErrorNoUpstream");
+    }
     if (message.includes("CONFLICT") || message.includes("conflict")) {
       return t("settings.gitErrorConflict");
     }
@@ -430,8 +453,23 @@ export function MySkills() {
     return fallback;
   };
 
+  // Detect errors that mean "the local repo's relationship to remote needs structural repair".
+  const isRecoverableSetupError = (error: unknown) => {
+    const message = getErrorMessage(error, "");
+    return (
+      message.includes("unrelated histories")
+      || message.includes("refusing to merge")
+      || message.includes("[rejected]")
+      || message.includes("non-fast-forward")
+      || message.includes("fetch first")
+      || message.includes("failed to push some refs")
+      || message.includes("no upstream")
+    );
+  };
+
   const refreshGitStatus = useCallback(async () => {
     try {
+      await api.gitBackupFetch().catch(() => {});
       const status = await api.gitBackupStatus();
       setGitStatus(status);
     } catch {
@@ -611,25 +649,56 @@ export function MySkills() {
 
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedIds);
-    let deleted = 0;
-    for (const id of ids) {
+    try {
+      const result = await api.deleteManagedSkills(ids);
+      if (selectedSkill && ids.includes(selectedSkill.id) && !result.failed.includes(selectedSkill.id)) {
+        closeSkillDetail();
+      }
+      if (result.deleted > 0) {
+        toast.success(t("mySkills.batchDeleted", { count: result.deleted }));
+      }
+      if (result.failed.length > 0) {
+        toast.error(t("mySkills.batchDeleteFailed", { count: result.failed.length }));
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, t("common.error")));
+    } finally {
+      exitMultiSelect();
+      setBatchDeleteConfirm(false);
+      await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+    }
+  };
+
+  const handleBatchEditTags = async (adds: string[], removes: string[]) => {
+    const selectedSkillsList = skills.filter((s) => selectedIds.has(s.id));
+    let updated = 0;
+    let failed = 0;
+    for (const skill of selectedSkillsList) {
+      const removeSet = new Set(removes);
+      const remaining = skill.tags.filter((tag) => !removeSet.has(tag));
+      const merged = [...remaining];
+      for (const tag of adds) {
+        if (!merged.includes(tag)) merged.push(tag);
+      }
+      const changed =
+        merged.length !== skill.tags.length ||
+        merged.some((tag, i) => tag !== skill.tags[i]);
+      if (!changed) continue;
       try {
-        await api.deleteManagedSkill(id);
-        if (selectedSkill?.id === id) closeSkillDetail();
-        deleted++;
+        await api.setSkillTags(skill.id, merged);
+        updated++;
       } catch {
-        // continue deleting remaining
+        failed++;
       }
     }
-    if (deleted > 0) {
-      toast.success(t("mySkills.batchDeleted", { count: deleted }));
+    if (updated > 0) {
+      toast.success(t("mySkills.batchTagsUpdated", { count: updated }));
     }
-    if (deleted < ids.length) {
-      toast.error(t("mySkills.batchDeleteFailed", { count: ids.length - deleted }));
+    if (failed > 0) {
+      toast.error(t("mySkills.batchTagsFailed", { count: failed }));
     }
-    exitMultiSelect();
-    setBatchDeleteConfirm(false);
-    await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+    await refreshManagedSkills();
+    await refreshAllTags();
   };
 
   const handleBatchToggleScenario = async () => {
@@ -662,6 +731,56 @@ export function MySkills() {
       toast.error(t("mySkills.batchToggleFailed", { count: failed }));
     }
     await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+  };
+
+  const handleBatchRefresh = async () => {
+    const refreshableSkills = skills.filter((skill) => selectedIds.has(skill.id) && canRefresh(skill));
+    if (refreshableSkills.length === 0) return;
+
+    setBatchUpdating(true);
+    try {
+      const result = await api.batchUpdateSkills(refreshableSkills.map((skill) => skill.id));
+      if (result.refreshed > 0) {
+        toast.success(t("mySkills.batchUpdated", { count: result.refreshed }));
+      }
+      if (result.unchanged > 0) {
+        toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
+      }
+      if (result.failed.length > 0) {
+        toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, t("common.error")));
+    } finally {
+      await refreshManagedSkills();
+      setBatchUpdating(false);
+    }
+  };
+
+  const handleUpdateAvailableSkills = async () => {
+    const updatableSkills = skills.filter(
+      (skill) => skill.update_status === "update_available" && canRefresh(skill)
+    );
+    if (updatableSkills.length === 0) return;
+
+    setBatchUpdating(true);
+    try {
+      const result = await api.batchUpdateSkills(updatableSkills.map((skill) => skill.id));
+      if (result.refreshed > 0) {
+        toast.success(t("mySkills.batchUpdated", { count: result.refreshed }));
+      }
+      if (result.unchanged > 0) {
+        toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
+      }
+      if (result.failed.length > 0) {
+        toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, t("common.error")));
+    } finally {
+      await refreshManagedSkills();
+      setBatchUpdating(false);
+    }
   };
 
   const handleToggleScenario = async (skill: ManagedSkill) => {
@@ -1045,19 +1164,56 @@ export function MySkills() {
     });
   };
 
-  const handleGitStartBackup = async () => {
+  const handleSetupClone = async () => {
     setGitLoading("start");
     try {
-      if (gitRemoteConfig) {
-        await api.gitBackupClone(gitRemoteConfig);
-        toast.success(t("settings.gitCloneSuccess"));
-      } else {
-        await api.gitBackupInit();
-        toast.success(t("settings.gitInitSuccess"));
-      }
+      await api.gitBackupClone(gitRemoteConfig);
+      toast.success(t("settings.gitCloneSuccess"));
       await refreshGitStatus();
     } catch (e) {
       toast.error(mapGitError(e));
+      throw e;
+    } finally {
+      setGitLoading(null);
+    }
+  };
+
+  const handleSetupInit = async () => {
+    setGitLoading("start");
+    try {
+      await api.gitBackupInit();
+      // If a remote is configured, attach it so the toolbar reflects "needs first push"
+      // rather than "synced", and the next click of Sync can push -u origin <branch>.
+      if (gitRemoteConfig) {
+        try {
+          await api.gitBackupSetRemote(gitRemoteConfig);
+        } catch (remoteErr) {
+          toast.error(mapGitError(remoteErr));
+        }
+      }
+      toast.success(t("settings.gitInitSuccess"));
+      await refreshGitStatus();
+    } catch (e) {
+      toast.error(mapGitError(e));
+      throw e;
+    } finally {
+      setGitLoading(null);
+    }
+  };
+
+  const handleRecoveryReclone = async () => {
+    if (!gitRemoteConfig) {
+      toast.info(t("settings.gitNeedRemoteSetup"));
+      return;
+    }
+    setGitLoading("recovery");
+    try {
+      await api.gitBackupReclone(gitRemoteConfig);
+      toast.success(t("settings.gitRecoveryRecloneSuccess"));
+      await Promise.all([refreshGitStatus(), refreshManagedSkills()]);
+    } catch (e) {
+      toast.error(mapGitError(e));
+      throw e;
     } finally {
       setGitLoading(null);
     }
@@ -1079,6 +1235,20 @@ export function MySkills() {
 
       if (!status.remote_url) {
         toast.info(t("settings.gitNeedRemoteSetup"));
+        return;
+      }
+
+      // Pre-flight: surface structural problems that would corrupt or block sync.
+      // `no_upstream` is intentionally NOT treated as fatal here — the backend's
+      // push path retries with `push -u origin <branch>`, which is the correct
+      // behavior for a freshly initialized repo or an empty remote. If that
+      // retry actually fails we'll still route to the recovery dialog via the
+      // post-failure handler below.
+      if (
+        status.upstream_health === "unrelated_histories"
+        || status.upstream_health === "detached"
+      ) {
+        setRecoveryOpen(true);
         return;
       }
 
@@ -1108,7 +1278,15 @@ export function MySkills() {
         await refreshGitVersions();
       }
     } catch (e) {
-      toast.error(mapGitError(e));
+      // If sync failed because local/remote diverged, route the user into the recovery flow
+      // instead of leaving them with a raw git error.
+      if (isRecoverableSetupError(e)) {
+        toast.error(mapGitError(e));
+        await refreshGitStatus();
+        setRecoveryOpen(true);
+      } else {
+        toast.error(mapGitError(e));
+      }
     } finally {
       setGitLoading(null);
     }
@@ -1130,20 +1308,28 @@ export function MySkills() {
     }
   };
 
-  const getGitSyncButtonState = () => {
-    if (!gitStatus) {
-      return {
-        label: t("mySkills.gitRepoSync"),
-        disabled: false,
-        toneClassName: "text-secondary",
-      };
+  type GitToolbarMode =
+    | "loading"
+    | "uninitialized"
+    | "needs_remote"
+    | "needs_fix"
+    | "up_to_date"
+    | "pending_changes";
+
+  const getGitToolbarMode = (): GitToolbarMode => {
+    if (!gitStatus) return "loading";
+    if (!gitStatus.is_repo) return "uninitialized";
+    if (!gitStatus.remote_url && !gitRemoteConfig) return "needs_remote";
+    if (
+      gitStatus.upstream_health === "unrelated_histories"
+      || gitStatus.upstream_health === "detached"
+    ) {
+      return "needs_fix";
     }
-    if (!gitStatus.remote_url && !gitRemoteConfig) {
-      return {
-        label: t("mySkills.gitRepoNeedRemote"),
-        disabled: true,
-        toneClassName: "text-red-500",
-      };
+    // First-push case: remote is set but upstream tracking is not yet established.
+    // Treat as a normal pending sync — the push path will set upstream automatically.
+    if (gitStatus.upstream_health === "no_upstream") {
+      return "pending_changes";
     }
     if (
       (!gitStatus.remote_url && gitRemoteConfig) ||
@@ -1157,18 +1343,56 @@ export function MySkills() {
         toneClassName: "text-amber-500",
       };
     }
-    if (!gitStatus.has_changes && gitStatus.ahead === 0 && gitStatus.behind === 0) {
-      return {
-        label: t("mySkills.gitRepoUpToDate"),
-        disabled: true,
-        toneClassName: "text-muted",
-      };
+    return "up_to_date";
+  };
+
+  const formatSnapshotWhen = (tag: string | null) => {
+    if (!tag) return null;
+    const label = displaySnapshotLabel(tag);
+    // Try to format YYYYMMDD-HHMMSS into MM-DD HH:MM
+    const match = label.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+    if (match) {
+      const [, , month, day, hour, min] = match;
+      return `${month}-${day} ${hour}:${min}`;
     }
-    return {
-      label: t("mySkills.gitRepoSync"),
-      disabled: false,
-      toneClassName: "text-secondary",
-    };
+    return label;
+  };
+
+  // Compact inline status: only render when there's actionable info the button alone
+  // does not convey. The button already tells the user "Synced" / "Set Up Backup" /
+  // "Fix Sync Setup", so we suppress redundant labels for those modes.
+  const renderGitInlineStatus = (mode: GitToolbarMode) => {
+    if (!gitStatus || mode === "loading" || mode === "up_to_date") return null;
+    if (mode === "uninitialized" || mode === "needs_remote" || mode === "needs_fix") {
+      return null;
+    }
+    const parts: string[] = [];
+    if (gitStatus.has_changes || gitStatus.ahead > 0) {
+      const localCount = Math.max(gitStatus.ahead, gitStatus.has_changes ? 1 : 0);
+      parts.push(`↑${localCount}`);
+    }
+    if (gitStatus.behind > 0) {
+      parts.push(`↓${gitStatus.behind}`);
+    }
+    if (parts.length === 0 && gitStatus.upstream_health === "no_upstream") {
+      parts.push("↑");
+    }
+    if (parts.length === 0) return null;
+    return (
+      <span
+        className="text-[11px] font-medium text-amber-600 dark:text-amber-400 tabular-nums"
+        title={[
+          gitStatus.has_changes || gitStatus.ahead > 0
+            ? t("mySkills.gitInlineLocalChanges", { count: Math.max(gitStatus.ahead, gitStatus.has_changes ? 1 : 0) })
+            : null,
+          gitStatus.behind > 0 ? t("mySkills.gitInlineRemoteUpdates", { count: gitStatus.behind }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      >
+        {parts.join(" ")}
+      </span>
+    );
   };
 
   const sourceIcon = (type: string) => {
@@ -1188,6 +1412,19 @@ export function MySkills() {
     skill.source_type === "git" ||
     skill.source_type === "skillssh" ||
     ((skill.source_type === "local" || skill.source_type === "import") && !!skill.source_ref);
+
+  const anyRefreshableSelected = useMemo(
+    () => skills.some((skill) => selectedIds.has(skill.id) && canRefresh(skill)),
+    [skills, selectedIds]
+  );
+  const availableUpdateCount = useMemo(
+    () => skills.filter((skill) => skill.update_status === "update_available" && canRefresh(skill)).length,
+    [skills]
+  );
+  const refreshableSelectedCount = useMemo(
+    () => skills.filter((skill) => selectedIds.has(skill.id) && canRefresh(skill)).length,
+    [skills, selectedIds]
+  );
 
   const sourceTypeLabel = (skill: ManagedSkill) =>
     skill.source_type === "skillssh" ? "skills.sh" : skill.source_type;
@@ -1414,6 +1651,14 @@ export function MySkills() {
             </button>
           )}
           <button
+            onClick={handleUpdateAvailableSkills}
+            disabled={batchUpdating || availableUpdateCount === 0}
+            className="mr-2 inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-accent-light transition-colors hover:bg-accent-bg disabled:opacity-50"
+          >
+            <RotateCcw className={cn("h-3.5 w-3.5", batchUpdating && "animate-spin")} />
+            {t("mySkills.updateActions.updateAvailable", { count: availableUpdateCount })}
+          </button>
+          <button
             onClick={() => setViewMode("grid")}
             className={cn(
               "rounded-md p-2 transition-colors outline-none",
@@ -1474,28 +1719,7 @@ export function MySkills() {
         {allTags.length > 0 && (
           <>
             <span className="mx-0.5 h-3 w-px bg-border-subtle" />
-            {allTags.map((tag, i) => {
-              const colors = [
-                "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-                "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-                "bg-violet-500/15 text-violet-600 dark:text-violet-400",
-                "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-                "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-                "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
-                "bg-orange-500/15 text-orange-600 dark:text-orange-400",
-                "bg-pink-500/15 text-pink-600 dark:text-pink-400",
-              ];
-              const activeColors = [
-                "bg-blue-500 text-white dark:bg-blue-500",
-                "bg-emerald-500 text-white dark:bg-emerald-500",
-                "bg-violet-500 text-white dark:bg-violet-500",
-                "bg-amber-500 text-white dark:bg-amber-500",
-                "bg-rose-500 text-white dark:bg-rose-500",
-                "bg-cyan-500 text-white dark:bg-cyan-500",
-                "bg-orange-500 text-white dark:bg-orange-500",
-                "bg-pink-500 text-white dark:bg-pink-500",
-              ];
-              const colorIndex = i % colors.length;
+            {allTags.map((tag) => {
               const isActive = tagFilters.has(tag);
               return (
                 <button
@@ -1503,7 +1727,7 @@ export function MySkills() {
                   onClick={() => setTagFilters(toggleFilter(tagFilters, tag))}
                   className={cn(
                     "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
-                    isActive ? activeColors[colorIndex] : colors[colorIndex]
+                    isActive ? getTagActiveColor(tag, allTags) : getTagColor(tag, allTags)
                   )}
                 >
                   {tag}
@@ -1519,10 +1743,13 @@ export function MySkills() {
           selectedCount={selectedIds.size}
           isAllSelected={isAllSelected}
           anyDisabled={viewedScenario ? anyDisabled : false}
+          anyUpdatable={anyRefreshableSelected}
           showToggle={!!viewedScenario}
+          updating={batchUpdating}
           labels={{
             hint: t("mySkills.selectHint"),
             selected: t("mySkills.selectedCount", { count: selectedIds.size }),
+            update: t("mySkills.batchUpdate", { count: refreshableSelectedCount }),
             delete: t("mySkills.deleteSelected", { count: selectedIds.size }),
             enable: t("mySkills.batchEnable", { count: selectedIds.size }),
             disable: t("mySkills.batchDisable", { count: selectedIds.size }),
@@ -1530,7 +1757,9 @@ export function MySkills() {
             deselectAll: t("mySkills.deselectAll"),
             cancel: t("common.cancel"),
             aiTag: t("mySkills.batchAiTag", { count: selectedIds.size }),
+            editTags: t("mySkills.batchEditTags", { count: selectedIds.size }),
           }}
+          onUpdate={handleBatchRefresh}
           onDelete={() => setBatchDeleteConfirm(true)}
           onToggle={handleBatchToggleScenario}
           onSelectAll={handleSelectAll}
@@ -1540,6 +1769,7 @@ export function MySkills() {
             handleBatchAiTag(selected);
           }}
           aiTagging={batchTagging}
+          onEditTags={() => setBatchTagDialogOpen(true)}
         />
       )}
 
@@ -1736,12 +1966,15 @@ export function MySkills() {
                       {skill.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="group/tag inline-flex items-center gap-0.5 rounded-full bg-accent-bg px-2 py-0.5 text-[11px] font-medium text-accent-light"
+                          className={cn(
+                            "group/tag inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                            getTagColor(tag, allTags)
+                          )}
                         >
                           {tag}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRemoveTag(skill, tag); }}
-                            className="hidden group-hover/tag:inline-flex rounded-full p-0 text-accent-light/60 hover:text-accent-light"
+                            className="hidden group-hover/tag:inline-flex rounded-full p-0 opacity-60 hover:opacity-100"
                           >
                             <X className="h-2.5 w-2.5" />
                           </button>
@@ -1822,7 +2055,8 @@ export function MySkills() {
                         </>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <SyncDots skill={skill} tools={tools} limit={6} />
                       {isPromptEditorMode && (
                         <button
                           onClick={(e) => {
@@ -1902,7 +2136,10 @@ export function MySkills() {
                   {skill.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="inline-flex items-center rounded-full bg-accent-bg px-1.5 py-0.5 text-[11px] font-medium text-accent-light"
+                      className={cn(
+                        "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-medium",
+                        getTagColor(tag, allTags)
+                      )}
                     >
                       {tag}
                     </span>
@@ -1932,6 +2169,7 @@ export function MySkills() {
                       {badge.label}
                     </span>
                   )}
+                  <SyncDots skill={skill} tools={tools} limit={6} size="sm" />
                   <span className="inline-flex items-center gap-1 text-[13px] text-muted">
                     {sourceIcon(skill.source_type)}
                     {sourceTypeLabel(skill)}
@@ -2039,6 +2277,7 @@ export function MySkills() {
         key={selectedSkill?.id ?? "skill-detail-empty"}
         skill={selectedSkill}
         onClose={closeSkillDetail}
+        tools={tools}
         toolToggles={toolToggles}
         togglingTool={togglingToolKey}
         onToggleTool={handleToggleSkillTool}
@@ -2049,6 +2288,13 @@ export function MySkills() {
         message={t("mySkills.batchDeleteConfirm", { count: selectedIds.size })}
         onClose={() => setBatchDeleteConfirm(false)}
         onConfirm={handleBatchDelete}
+      />
+      <BatchTagDialog
+        open={batchTagDialogOpen}
+        skills={skills.filter((s) => selectedIds.has(s.id))}
+        allTags={allTags}
+        onClose={() => setBatchTagDialogOpen(false)}
+        onApply={handleBatchEditTags}
       />
       <ConfirmDialog
         open={restoreVersionTag !== null}

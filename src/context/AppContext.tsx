@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { ManagedSkill, Project, Scenario, ToolInfo } from "../lib/tauri";
 import * as api from "../lib/tauri";
 import i18n from "../i18n";
+import { applyTextSize } from "../lib/textScale";
 import { toast } from "sonner";
 
 interface AppState {
@@ -38,6 +39,7 @@ const VIEWED_SCENARIO_LS_KEY = "skills-manager.viewedScenarioId";
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const SKILL_UPDATE_TOAST_ID = "skill-update-available";
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
   const [viewedScenarioId, setViewedScenarioIdState] = useState<string | null>(() => {
@@ -56,6 +58,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
   const fileRefreshInFlightRef = useRef(false);
   const pendingFileRefreshRef = useRef(false);
+  const autoCheckInFlightRef = useRef(false);
+  const lastUpdateNotificationRef = useRef<string | null>(null);
 
   const setTranslatedError = useCallback((key: string) => {
     setAppError(i18n.t("common.loadFailed", { item: i18n.t(key) }));
@@ -185,8 +189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Apply saved text size on startup
       const savedSize = await api.getSettings("text_size").catch(() => null);
       if (savedSize) {
-        const zoomMap: Record<string, string> = { small: "0.9", default: "1", large: "1.1", xlarge: "1.2" };
-        document.documentElement.style.zoom = zoomMap[savedSize] || "1";
+        applyTextSize(savedSize);
       }
     }
     init();
@@ -256,25 +259,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshAfterFileChange]);
 
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const unlistenPromise = listen("app-files-changed", () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+      refreshTimer = setTimeout(() => {
+        refreshAppData().catch((error) => {
+          console.error("Failed to refresh after filesystem change:", error);
+        });
+      }, 500);
+    });
+
+    return () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+      unlistenPromise
+        .then((unlisten) => unlisten())
+        .catch((error) => {
+          console.error("Failed to unlisten app-files-changed:", error);
+        });
+    };
+  }, [refreshAppData]);
+
   // Auto-check skill updates on startup (non-blocking, silent)
   useEffect(() => {
     if (loading || managedSkills.length === 0) return;
     const hasGitSkills = managedSkills.some(
       (s) => s.source_type === "git" || s.source_type === "skillssh"
     );
-    if (!hasGitSkills) return;
+    if (!hasGitSkills || autoCheckInFlightRef.current) return;
 
     // Delay to avoid slowing down initial render
     const timer = setTimeout(() => {
+      autoCheckInFlightRef.current = true;
       api.checkAllSkillUpdates(false)
         .then(async () => {
           const skills = await api.getManagedSkills();
           setManagedSkills(skills);
-          const updatable = skills.filter((s) => s.update_status === "update_available");
+          const updatable = skills
+            .filter((s) => s.update_status === "update_available")
+            .sort((a, b) => a.id.localeCompare(b.id));
+
+          if (updatable.length === 0) {
+            lastUpdateNotificationRef.current = null;
+            toast.dismiss(SKILL_UPDATE_TOAST_ID);
+            return;
+          }
+
+          const notificationSignature = updatable.map((skill) => skill.id).join("|");
+          if (lastUpdateNotificationRef.current === notificationSignature) {
+            return;
+          }
+
+          lastUpdateNotificationRef.current = notificationSignature;
           if (updatable.length > 0) {
             toast.info(
               i18n.t("mySkills.updateNotification", { count: updatable.length }),
               {
+                id: SKILL_UPDATE_TOAST_ID,
                 duration: 8000,
                 action: {
                   label: i18n.t("mySkills.viewUpdates"),
@@ -293,7 +339,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             );
           }
         })
-        .catch(() => {}); // silent failure
+        .catch(() => {}) // silent failure
+        .finally(() => {
+          autoCheckInFlightRef.current = false;
+        });
     }, 3000);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
