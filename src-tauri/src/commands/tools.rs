@@ -162,7 +162,13 @@ fn sync_active_scenario_to_tool(store: &SkillStore, tool_key: &str) {
                     synced_at: Some(now),
                     last_error: None,
                 };
-                store.insert_target(&target_record).ok();
+                if let Err(e) = store.insert_target(&target_record) {
+                    log::warn!(
+                        "Failed to record sync target for skill {} tool {}: {e}",
+                        skill.id,
+                        adapter.key
+                    );
+                }
             }
             Err(e) => {
                 log::warn!(
@@ -177,11 +183,29 @@ fn sync_active_scenario_to_tool(store: &SkillStore, tool_key: &str) {
 }
 
 /// Remove all synced skill files and target records for a given tool.
+///
+/// Best-effort cleanup: logs DB read failures and continues. Callers that
+/// need strict error propagation should query targets themselves.
 fn unsync_all_for_tool(store: &SkillStore, tool_key: &str) {
-    let targets = store.get_all_targets().unwrap_or_default();
+    let targets = match store.get_all_targets() {
+        Ok(targets) => targets,
+        Err(e) => {
+            log::warn!(
+                "unsync_all_for_tool({tool_key}): failed to read targets: {e}"
+            );
+            return;
+        }
+    };
     for target in targets.iter().filter(|t| t.tool == tool_key) {
-        sync_engine::remove_target(&PathBuf::from(&target.target_path)).ok();
-        store.delete_target(&target.skill_id, tool_key).ok();
+        if let Err(e) = sync_engine::remove_target(&PathBuf::from(&target.target_path)) {
+            log::warn!("Failed to remove sync target {}: {e}", target.target_path);
+        }
+        if let Err(e) = store.delete_target(&target.skill_id, tool_key) {
+            log::warn!(
+                "Failed to delete target record for skill {} tool {tool_key}: {e}",
+                target.skill_id
+            );
+        }
     }
 }
 
@@ -422,10 +446,19 @@ pub async fn remove_custom_tool(
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         // Remove synced targets for this tool
-        let targets = store.get_all_targets().unwrap_or_default();
+        let targets = store.get_all_targets().map_err(AppError::db)?;
         for target in targets.iter().filter(|t| t.tool == key) {
-            crate::core::sync_engine::remove_target(&PathBuf::from(&target.target_path)).ok();
-            store.delete_target(&target.skill_id, &key).ok();
+            if let Err(e) =
+                crate::core::sync_engine::remove_target(&PathBuf::from(&target.target_path))
+            {
+                log::warn!("Failed to remove sync target {}: {e}", target.target_path);
+            }
+            if let Err(e) = store.delete_target(&target.skill_id, &key) {
+                log::warn!(
+                    "Failed to delete target record for skill {} tool {key}: {e}",
+                    target.skill_id
+                );
+            }
         }
         // Remove from custom_tools list
         let mut customs = get_custom_tools(&store);

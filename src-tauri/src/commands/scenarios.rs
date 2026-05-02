@@ -34,7 +34,9 @@ pub(crate) fn sync_skill_to_active_scenario(
             };
             let source = PathBuf::from(&skill.central_path);
             let target_name = sync_engine::target_dir_name(&source, &skill.name);
-            let old_targets = store.get_targets_for_skill(skill_id).unwrap_or_default();
+            let old_targets = store
+                .get_targets_for_skill(skill_id)
+                .map_err(AppError::db)?;
             for adapter in &adapters {
                 // Remove stale target from a previous sync if the skill name changed
                 if let Some(old) = old_targets.iter().find(|t| t.tool == adapter.key) {
@@ -467,7 +469,9 @@ pub async fn remove_skill_from_scenario(
         if !is_global {
             if let Ok(Some(active_id)) = store.get_active_scenario_id() {
                 if active_id == scenario_id {
-                    let targets = store.get_targets_for_skill(&skill_id).unwrap_or_default();
+                    let targets = store
+                        .get_targets_for_skill(&skill_id)
+                        .map_err(AppError::db)?;
                     for target in &targets {
                         let path = PathBuf::from(&target.target_path);
                         if let Err(e) = sync_engine::remove_target(&path) {
@@ -709,7 +713,9 @@ pub(crate) fn unsync_scenario_skills(
     }
 
     // 1. Batch query: get all targets for all skills at once
-    let all_targets = store.get_targets_for_skills(&skill_ids).unwrap_or_default();
+    let all_targets = store
+        .get_targets_for_skills(&skill_ids)
+        .map_err(AppError::db)?;
 
     // 2. Parallel file removal
     all_targets.par_iter().for_each(|target| {
@@ -825,7 +831,7 @@ pub(crate) fn sync_all_skills(store: &SkillStore) -> Result<(), AppError> {
 
 /// Remove ALL sync targets from the filesystem and database.
 fn unsync_all_skills(store: &SkillStore) -> Result<(), AppError> {
-    let all_targets = store.get_all_targets().unwrap_or_default();
+    let all_targets = store.get_all_targets().map_err(AppError::db)?;
 
     all_targets.par_iter().for_each(|target| {
         let path = PathBuf::from(&target.target_path);

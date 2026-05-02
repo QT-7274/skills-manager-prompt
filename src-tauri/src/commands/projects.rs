@@ -706,8 +706,8 @@ pub async fn get_project_skills(
         let configs = agent_skill_configs(&store);
         let mut skills = read_workspace_skills(&record, &configs);
 
-        let all_managed = store.get_all_skills().unwrap_or_default();
-        let tags_map = store.get_tags_map().unwrap_or_default();
+        let all_managed = store.get_all_skills().map_err(AppError::db)?;
+        let tags_map = store.get_tags_map().map_err(AppError::db)?;
         for skill in &mut skills {
             let matched = find_best_center_match(skill, &all_managed);
             skill.in_center = matched.is_some();
@@ -835,7 +835,7 @@ pub async fn import_project_skill_to_center(
             .ok_or_else(|| AppError::not_found("Skill not found in workspace"))?;
 
         let source_path = PathBuf::from(&skill.path);
-        let all_managed = store.get_all_skills().unwrap_or_default();
+        let all_managed = store.get_all_skills().map_err(AppError::db)?;
         // Use the same matching logic as the UI (find_best_center_match) to
         // stay consistent with sync-status display. After updating, bind
         // source_ref so future imports match by exact path.
@@ -1023,7 +1023,7 @@ pub async fn update_project_skill_from_center(
             .find(|s| s.relative_path == skill_relative_path && s.agent == agent)
             .ok_or_else(|| AppError::not_found("Skill not found in workspace"))?;
 
-        let all_managed = store.get_all_skills().unwrap_or_default();
+        let all_managed = store.get_all_skills().map_err(AppError::db)?;
         let managed = find_best_center_match(skill, &all_managed)
             .ok_or_else(|| AppError::not_found("No matching skill in center"))?;
 

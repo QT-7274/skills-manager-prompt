@@ -1110,7 +1110,9 @@ fn managed_skill_by_id(store: &SkillStore, skill_id: &str) -> Result<ManagedSkil
     let tags_map = store.get_tags_map().map_err(AppError::db)?;
     
     // For single skill, use get_scenarios_for_skill directly
-    let scenario_ids = store.get_scenarios_for_skill(skill_id).unwrap_or_default();
+    let scenario_ids = store
+        .get_scenarios_for_skill(skill_id)
+        .map_err(AppError::db)?;
     let mut scenarios_map = std::collections::HashMap::new();
     scenarios_map.insert(skill_id.to_string(), scenario_ids);
     

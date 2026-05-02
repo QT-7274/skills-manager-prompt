@@ -656,14 +656,6 @@ fn ensure_gitignore(skills_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn with_repo_lock<T, F>(repo_root: &Path, operation: &str, f: F) -> Result<T>
-where
-    F: FnOnce() -> Result<T>,
-{
-    let _lock = RepoLock::acquire(repo_root, operation)?;
-    f()
-}
-
 fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
     let output = git_command()
         .arg("-C")
