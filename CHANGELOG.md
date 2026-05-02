@@ -32,10 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.15.1] - 2026-04-28
 
+### Added
+- Show real-time clone progress while installing skills from Git repositories.
+- Cache cloned Git repositories to speed up repeated installs and reduce network wait time.
+
 ### Changed
+- Redesigned the Git backup experience with clearer health status and recovery actions.
+- Improved the Git toolbar layout to reduce crowding around filter controls.
 - Use symlinks as the default sync mode for faster scenario switching and a single source of truth.
 
 ### Fixed
+- Improved Git sync robustness and recovery behavior.
+- Avoided no-op commit failures when initializing Git backup.
+- Hardened sync metadata handling across lifecycle events and Windows directory cleanup.
+- Improved cached Git checkout isolation and materialization reliability.
 - Improved bulk skill deletion performance by processing selected skills in one operation.
 
 ## [1.15.0] - 2026-04-25
@@ -53,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Emit refresh event when polling rescan picks up new watch directories
 - Stop watching empty skill dirs so users can delete agent folders
 - Remove emptied skills-disabled directory after re-enabling last skill
+
+## [1.14.3] - 2026-04-21
 
 ## [1.14.3] - 2026-04-21
 

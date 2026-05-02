@@ -5,6 +5,7 @@ use walkdir::WalkDir;
 use super::central_repo;
 use super::content_hash;
 use super::skill_metadata::{self, sanitize_skill_name};
+use super::sync_engine;
 
 pub struct InstallResult {
     pub name: String,
@@ -89,12 +90,8 @@ pub fn install_from_local(source: &Path, name: Option<&str>) -> Result<InstallRe
         _ => skill_metadata::infer_skill_name(skill_dir),
     };
 
-    let source_meta_name = skill_metadata::parse_skill_md(skill_dir)
-        .name
-        .unwrap_or_else(|| sanitized_name.clone());
-
     let skills_dir = central_repo::skills_dir();
-    let dest = unique_skill_dest(&skills_dir, &sanitized_name, &source_meta_name);
+    let dest = unique_skill_dest(&skills_dir, &sanitized_name, skill_dir)?;
     let final_name = dest
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -132,6 +129,11 @@ pub fn resolve_local_skill_name(source: &Path, name: Option<&str>) -> Result<Str
     })
 }
 
+pub fn hash_local_source(source: &Path) -> Result<String> {
+    let prepared = PreparedSource::open(source)?;
+    content_hash::hash_directory(prepared.skill_dir())
+}
+
 pub fn install_from_git_dir(source: &Path, name: Option<&str>) -> Result<InstallResult> {
     install_from_local(source, name)
 }
@@ -142,6 +144,8 @@ pub fn install_skill_dir_to_destination(
     destination: &Path,
 ) -> Result<InstallResult> {
     let meta = skill_metadata::parse_skill_md(source);
+
+    sync_engine::ensure_dst_not_inside_src(source, destination)?;
 
     if destination.exists() {
         std::fs::remove_dir_all(destination)
@@ -211,7 +215,9 @@ fn safe_extract(archive: &mut zip::ZipArchive<std::fs::File>, dest: &Path) -> Re
 /// - Reuse an existing directory when it clearly belongs to the same skill
 ///   (same metadata `name`, or legacy no-metadata `<name>` directory).
 /// - Otherwise allocate `<name>-2`, `<name>-3`, ...
-fn unique_skill_dest(parent: &Path, sanitized_name: &str, source_meta_name: &str) -> PathBuf {
+fn unique_skill_dest(parent: &Path, sanitized_name: &str, source: &Path) -> Result<PathBuf> {
+    let source_hash = content_hash::hash_directory(source)?;
+
     for i in 1u32.. {
         let candidate = if i == 1 {
             parent.join(sanitized_name)
@@ -220,23 +226,15 @@ fn unique_skill_dest(parent: &Path, sanitized_name: &str, source_meta_name: &str
         };
 
         if !candidate.exists() {
-            return candidate;
+            return Ok(candidate);
         }
 
-        let existing_meta_name = skill_metadata::parse_skill_md(&candidate).name.or_else(|| {
-            if i == 1 {
-                Some(sanitized_name.to_string())
-            } else {
-                None
-            }
-        });
-
-        if existing_meta_name.as_deref() == Some(source_meta_name) {
-            return candidate;
+        if content_hash::hash_directory(&candidate).ok().as_deref() == Some(source_hash.as_str()) {
+            return Ok(candidate);
         }
     }
 
-    parent.join(sanitized_name)
+    Ok(parent.join(sanitized_name))
 }
 
 fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
@@ -269,7 +267,9 @@ fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use tempfile::tempdir;
+    use zip::write::SimpleFileOptions;
 
     fn make_skill_dir(parent: &Path, dir_name: &str, meta_name: Option<&str>) -> PathBuf {
         let dir = parent.join(dir_name);
@@ -283,44 +283,118 @@ mod tests {
     #[test]
     fn unique_dest_returns_base_when_free() {
         let tmp = tempdir().unwrap();
-        let dest = unique_skill_dest(tmp.path(), "a-b", "a-b");
+        let source = make_skill_dir(tmp.path(), "source", Some("a-b"));
+        let dest = unique_skill_dest(tmp.path(), "a-b", &source).unwrap();
         assert_eq!(dest, tmp.path().join("a-b"));
     }
 
     #[test]
-    fn unique_dest_reuses_base_for_same_meta_name() {
+    fn unique_dest_reuses_base_for_same_content() {
         let tmp = tempdir().unwrap();
-        make_skill_dir(tmp.path(), "a-b", Some("A B"));
+        let existing = make_skill_dir(tmp.path(), "a-b", Some("A B"));
+        let source = make_skill_dir(tmp.path(), "source", Some("A B"));
+        std::fs::write(existing.join("body.md"), "same").unwrap();
+        std::fs::write(source.join("body.md"), "same").unwrap();
 
-        let dest = unique_skill_dest(tmp.path(), "a-b", "A B");
+        let dest = unique_skill_dest(tmp.path(), "a-b", &source).unwrap();
         assert_eq!(dest, tmp.path().join("a-b"));
     }
 
     #[test]
-    fn unique_dest_uses_suffix_for_different_meta_name() {
+    fn unique_dest_uses_suffix_for_different_content_even_if_name_matches() {
         let tmp = tempdir().unwrap();
-        make_skill_dir(tmp.path(), "a-b", Some("A-B"));
+        let existing = make_skill_dir(tmp.path(), "a-b", Some("A-B"));
+        let source = make_skill_dir(tmp.path(), "source", Some("A-B"));
+        std::fs::write(existing.join("body.md"), "old").unwrap();
+        std::fs::write(source.join("body.md"), "new").unwrap();
 
-        let dest = unique_skill_dest(tmp.path(), "a-b", "A:B");
+        let dest = unique_skill_dest(tmp.path(), "a-b", &source).unwrap();
         assert_eq!(dest, tmp.path().join("a-b-2"));
     }
 
     #[test]
-    fn unique_dest_reuses_existing_suffix_for_reinstall() {
+    fn unique_dest_reuses_existing_suffix_for_same_content() {
         let tmp = tempdir().unwrap();
-        make_skill_dir(tmp.path(), "a-b", Some("A-B"));
-        make_skill_dir(tmp.path(), "a-b-2", Some("A:B"));
+        let first = make_skill_dir(tmp.path(), "a-b", Some("A-B"));
+        let second = make_skill_dir(tmp.path(), "a-b-2", Some("A-B"));
+        let source = make_skill_dir(tmp.path(), "source", Some("A-B"));
+        std::fs::write(first.join("body.md"), "first").unwrap();
+        std::fs::write(second.join("body.md"), "second").unwrap();
+        std::fs::write(source.join("body.md"), "second").unwrap();
 
-        let dest = unique_skill_dest(tmp.path(), "a-b", "A:B");
+        let dest = unique_skill_dest(tmp.path(), "a-b", &source).unwrap();
         assert_eq!(dest, tmp.path().join("a-b-2"));
     }
 
     #[test]
-    fn unique_dest_legacy_no_metadata_base_can_reinstall() {
+    fn install_skill_dir_refuses_destination_inside_source() {
         let tmp = tempdir().unwrap();
-        make_skill_dir(tmp.path(), "legacy", None);
+        let source = make_skill_dir(tmp.path(), "skills", Some("skills"));
+        std::fs::write(source.join("body.md"), "data").unwrap();
+        let destination = source.join("skills");
 
-        let dest = unique_skill_dest(tmp.path(), "legacy", "legacy");
+        let err = install_skill_dir_to_destination(&source, "skills", &destination)
+            .err()
+            .expect("expected refusal");
+        assert!(
+            err.to_string().contains("infinite recursion"),
+            "unexpected error: {err}"
+        );
+        // The source must not be touched, and no nested copy must exist.
+        assert!(source.join("body.md").exists());
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn unique_dest_legacy_no_metadata_base_can_reinstall_if_content_matches() {
+        let tmp = tempdir().unwrap();
+        let existing = make_skill_dir(tmp.path(), "legacy", None);
+        let source = make_skill_dir(tmp.path(), "source", None);
+        std::fs::write(existing.join("body.md"), "same").unwrap();
+        std::fs::write(source.join("body.md"), "same").unwrap();
+
+        let dest = unique_skill_dest(tmp.path(), "legacy", &source).unwrap();
         assert_eq!(dest, tmp.path().join("legacy"));
+    }
+
+    fn write_skill_archive(path: &Path, body: &str) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        zip.start_file("demo-skill/SKILL.md", options).unwrap();
+        zip.write_all(b"---\nname: Demo Skill\n---\n").unwrap();
+        zip.start_file("demo-skill/body.md", options).unwrap();
+        zip.write_all(body.as_bytes()).unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn hash_local_source_matches_extracted_archive_representation() {
+        let tmp = tempdir().unwrap();
+        let archive = tmp.path().join("demo.skill");
+        write_skill_archive(&archive, "same content");
+
+        let extracted = tmp.path().join("extracted");
+        std::fs::create_dir_all(&extracted).unwrap();
+        std::fs::write(extracted.join("SKILL.md"), "---\nname: Demo Skill\n---\n").unwrap();
+        std::fs::write(extracted.join("body.md"), "same content").unwrap();
+
+        let archive_hash = hash_local_source(&archive).unwrap();
+        let dir_hash = content_hash::hash_directory(&extracted).unwrap();
+
+        assert_eq!(archive_hash, dir_hash);
+    }
+
+    #[test]
+    fn hash_local_source_detects_archive_content_changes() {
+        let tmp = tempdir().unwrap();
+        let archive = tmp.path().join("demo.zip");
+        write_skill_archive(&archive, "v1");
+        let first_hash = hash_local_source(&archive).unwrap();
+
+        write_skill_archive(&archive, "v2");
+        let second_hash = hash_local_source(&archive).unwrap();
+
+        assert_ne!(first_hash, second_hash);
     }
 }

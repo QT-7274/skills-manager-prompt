@@ -171,6 +171,58 @@ impl SkillStore {
         Ok(())
     }
 
+    pub fn upsert_skill(&self, skill: &SkillRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO skills (
+                id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,
+                source_branch, source_revision, remote_revision, central_path, content_hash, enabled,
+                created_at, updated_at, status, update_status, last_checked_at, last_check_error
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                source_type = excluded.source_type,
+                source_ref = excluded.source_ref,
+                source_ref_resolved = excluded.source_ref_resolved,
+                source_subpath = excluded.source_subpath,
+                source_branch = excluded.source_branch,
+                source_revision = excluded.source_revision,
+                remote_revision = excluded.remote_revision,
+                central_path = excluded.central_path,
+                content_hash = excluded.content_hash,
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at,
+                status = excluded.status,
+                update_status = excluded.update_status,
+                last_checked_at = excluded.last_checked_at,
+                last_check_error = excluded.last_check_error",
+            params![
+                skill.id,
+                skill.name,
+                skill.description,
+                skill.source_type,
+                skill.source_ref,
+                skill.source_ref_resolved,
+                skill.source_subpath,
+                skill.source_branch,
+                skill.source_revision,
+                skill.remote_revision,
+                skill.central_path,
+                skill.content_hash,
+                skill.enabled,
+                skill.created_at,
+                skill.updated_at,
+                skill.status,
+                skill.update_status,
+                skill.last_checked_at,
+                skill.last_check_error,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn get_all_skills(&self) -> Result<Vec<SkillRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -908,6 +960,88 @@ impl SkillStore {
         Ok(())
     }
 
+    pub fn replace_scenarios_from_metadata(
+        &self,
+        scenarios: &[super::sync_metadata::ScenarioMetaFile],
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let metadata_ids: std::collections::HashSet<&str> =
+            scenarios.iter().map(|s| s.scenario_id.as_str()).collect();
+        {
+            let mut stmt = tx.prepare("SELECT id FROM scenarios")?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for id in ids {
+                if !metadata_ids.contains(id.as_str()) {
+                    tx.execute("DELETE FROM scenarios WHERE id = ?1", params![id])?;
+                }
+            }
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        for scenario in scenarios {
+            tx.execute(
+                "INSERT INTO scenarios (id, name, description, icon, sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    icon = excluded.icon,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at",
+                params![
+                    scenario.scenario_id,
+                    scenario.name,
+                    scenario.description,
+                    scenario.icon,
+                    scenario.sort_order,
+                    now,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn replace_scenario_memberships_from_metadata(
+        &self,
+        memberships: &[super::sync_metadata::ScenarioSkillMetaFile],
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM scenario_skill_tools", [])?;
+        tx.execute("DELETE FROM scenario_skills", [])?;
+        let now = chrono::Utc::now().timestamp_millis();
+        for member in memberships {
+            tx.execute(
+                "INSERT OR IGNORE INTO scenario_skills (scenario_id, skill_id, added_at, sort_order)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    member.scenario_id,
+                    member.skill_id,
+                    now,
+                    member.sort_order,
+                ],
+            )?;
+            for (tool, enabled) in &member.tools {
+                tx.execute(
+                    "INSERT OR REPLACE INTO scenario_skill_tools (scenario_id, skill_id, tool, enabled, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        member.scenario_id,
+                        member.skill_id,
+                        tool,
+                        enabled,
+                        now,
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_scenario_skill_tool_toggles(
         &self,
         scenario_id: &str,
@@ -1145,66 +1279,6 @@ impl SkillStore {
         }
         tx.commit()?;
         Ok(())
-    }
-
-    /// Batch ensure defaults for multiple skills in a single transaction.
-    pub fn ensure_scenario_skill_tool_defaults_batch(
-        &self,
-        scenario_id: &str,
-        skill_ids: &[String],
-        tools: &[String],
-    ) -> Result<()> {
-        if skill_ids.is_empty() || tools.is_empty() {
-            return Ok(());
-        }
-        let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-        let now = chrono::Utc::now().timestamp_millis();
-        for skill_id in skill_ids {
-            for tool in tools {
-                tx.execute(
-                    "INSERT OR IGNORE INTO scenario_skill_tools (scenario_id, skill_id, tool, enabled, updated_at) \
-                     VALUES (?1, ?2, ?3, 1, ?4)",
-                    params![scenario_id, skill_id, tool, now],
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Batch query: for each skill in a scenario, return which tools are enabled.
-    pub fn get_enabled_tools_for_scenario_skills_batch(
-        &self,
-        scenario_id: &str,
-        skill_ids: &[String],
-    ) -> Result<HashMap<String, Vec<String>>> {
-        if skill_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<String> = (2..=skill_ids.len() + 1)
-            .map(|i| format!("?{i}"))
-            .collect();
-        let sql = format!(
-            "SELECT skill_id, tool FROM scenario_skill_tools \
-             WHERE scenario_id = ?1 AND enabled = 1 AND skill_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let mut all_params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(1 + skill_ids.len());
-        all_params.push(&scenario_id as &dyn rusqlite::ToSql);
-        for sid in skill_ids {
-            all_params.push(sid as &dyn rusqlite::ToSql);
-        }
-        let rows = stmt.query_map(all_params.as_slice(), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        for row in rows.filter_map(|r| r.ok()) {
-            map.entry(row.0).or_default().push(row.1);
-        }
-        Ok(map)
     }
 
     // ── Skill Tags ──

@@ -38,16 +38,11 @@ import { cn } from "../utils";
 import { useApp } from "../context/AppContext";
 import { useThemeContext } from "../context/ThemeContext";
 import * as api from "../lib/tauri";
+import { applyTextSize } from "../lib/textScale";
 import type { AppUpdateInfo } from "../lib/tauri";
 import type { Theme } from "../hooks/useTheme";
 
 const IS_WINDOWS = navigator.userAgent.includes("Windows");
-const TEXT_SIZE_ZOOM_MAP: Record<string, string> = {
-  small: "0.9",
-  default: "1",
-  large: "1.1",
-  xlarge: "1.2",
-};
 
 const MAINSTREAM_AGENT_KEYS = new Set([
   "claude_code",
@@ -63,10 +58,6 @@ const MAINSTREAM_AGENT_KEYS = new Set([
 ]);
 
 type AiProvider = "codebuddy" | "openai_compatible";
-
-function applyTextSize(size: string) {
-  document.documentElement.style.zoom = TEXT_SIZE_ZOOM_MAP[size] || "1";
-}
 
 function compactHomePath(path: string) {
   return path
@@ -90,6 +81,10 @@ export function Settings() {
   const [openingRepo, setOpeningRepo] = useState(false);
   const [openingGithub, setOpeningGithub] = useState(false);
   const [centralRepoPath, setCentralRepoPath] = useState("");
+  const [centralRepoPathOverride, setCentralRepoPathOverride] = useState<string | null>(null);
+  const [editingCentralRepoPath, setEditingCentralRepoPath] = useState(false);
+  const [centralRepoPathInput, setCentralRepoPathInput] = useState("");
+  const [savingCentralRepoPath, setSavingCentralRepoPath] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -114,6 +109,9 @@ export function Settings() {
   // Agent path editing
   const [editingPathKey, setEditingPathKey] = useState<string | null>(null);
   const [editingPathValue, setEditingPathValue] = useState("");
+  // Project path editing (custom agents only)
+  const [editingProjectPathKey, setEditingProjectPathKey] = useState<string | null>(null);
+  const [editingProjectPathValue, setEditingProjectPathValue] = useState("");
   // Custom agent dialog
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [customName, setCustomName] = useState("");
@@ -139,6 +137,24 @@ export function Settings() {
       toast.error(String(e));
     } finally {
       setEditingPathKey(null);
+    }
+  };
+
+  const startEditProjectPath = useCallback((key: string, currentPath: string | null) => {
+    setEditingProjectPathKey(key);
+    setEditingProjectPathValue(currentPath ?? "");
+  }, []);
+
+  const handleSaveProjectPath = async () => {
+    if (!editingProjectPathKey) return;
+    const trimmed = editingProjectPathValue.trim();
+    try {
+      await api.setCustomToolProjectPath(editingProjectPathKey, trimmed || null);
+      await refreshTools();
+      toast.success(t("settings.pathSaved"));
+      setEditingProjectPathKey(null);
+    } catch (e) {
+      toast.error(String(e));
     }
   };
 
@@ -235,7 +251,11 @@ export function Settings() {
     api.getSettings("openai_compatible_model").then((v) => { if (v) setOpenaiModel(v); });
     api.getSettings("openai_compatible_temperature").then((v) => { if (v) setOpenaiTemperature(v); });
     api.getSettings("openai_compatible_max_tokens").then((v) => { if (v) setOpenaiMaxTokens(v); });
-    api.getCentralRepoPath().then(setCentralRepoPath).catch(() => {});
+    api.getCentralRepoPath().then((path) => {
+      setCentralRepoPath(path);
+      setCentralRepoPathInput(path);
+    }).catch(() => {});
+    api.getCentralRepoPathOverride().then(setCentralRepoPathOverride).catch(() => {});
 
     (async () => {
       const savedRemote = (await api.getSettings("git_backup_remote_url").catch(() => null))?.trim() || "";
@@ -338,6 +358,49 @@ export function Settings() {
       toast.error(t("common.error"));
     } finally {
       setOpeningRepo(false);
+    }
+  };
+
+  const handleStartEditCentralRepoPath = () => {
+    setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
+    setEditingCentralRepoPath(true);
+  };
+
+  const handleSaveCentralRepoPath = async () => {
+    const trimmed = centralRepoPathInput.trim();
+    if (!trimmed) {
+      toast.error(t("settings.repoPathEmpty"));
+      return;
+    }
+    setSavingCentralRepoPath(true);
+    try {
+      const nextPath = await api.setCentralRepoPath(trimmed);
+      setCentralRepoPath(nextPath);
+      setCentralRepoPathOverride(nextPath);
+      setEditingCentralRepoPath(false);
+      toast.success(t("settings.repoPathSaved"));
+      toast.info(t("settings.repoPathRestartNotice"));
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setSavingCentralRepoPath(false);
+    }
+  };
+
+  const handleResetCentralRepoPath = async () => {
+    setSavingCentralRepoPath(true);
+    try {
+      const nextPath = await api.setCentralRepoPath(null);
+      setCentralRepoPath(nextPath);
+      setCentralRepoPathOverride(null);
+      setCentralRepoPathInput(nextPath);
+      setEditingCentralRepoPath(false);
+      toast.success(t("settings.repoPathReset"));
+      toast.info(t("settings.repoPathRestartNotice"));
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setSavingCentralRepoPath(false);
     }
   };
 
@@ -476,6 +539,7 @@ export function Settings() {
 
   const fieldClass =
     "h-8 rounded-[4px] border border-border-subtle bg-background px-2.5 text-[13px] text-secondary outline-none transition-colors focus:border-border";
+  const selectClass = `${fieldClass} min-w-[180px] appearance-none pr-8`;
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-[4px] border px-2.5 text-[13px] font-medium transition-colors outline-none disabled:opacity-60";
   const segmentedButtonClass =
@@ -514,7 +578,7 @@ export function Settings() {
   );
   const displayedRepoPath = centralRepoPath
     ? compactHomePath(centralRepoPath)
-    : "~/.skills-manager/";
+    : t("common.loading");
 
   const renderAgentCard = (agent: typeof tools[number]) => (
     <div
@@ -662,18 +726,59 @@ export function Settings() {
           <p className="truncate text-[12px] font-mono leading-tight text-muted" title={agent.skills_dir}>
             {agent.installed ? compactHomePath(agent.skills_dir) : t("settings.notInstalled")}
           </p>
-          {agent.is_custom && agent.project_relative_skills_dir && (
-            <p
-              className="truncate text-[12px] font-mono leading-tight text-muted"
-              title={agent.project_relative_skills_dir}
-            >
-              {t("settings.projectSkillsPathValue", { path: agent.project_relative_skills_dir })}
-            </p>
+          {agent.is_custom && (
+            editingProjectPathKey === agent.key ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={editingProjectPathValue}
+                  onChange={(e) => setEditingProjectPathValue(e.target.value)}
+                  placeholder={t("settings.projectSkillsPathPlaceholder")}
+                  className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveProjectPath();
+                    if (e.key === "Escape") setEditingProjectPathKey(null);
+                  }}
+                />
+                <button
+                  onClick={handleSaveProjectPath}
+                  className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+                >
+                  <Check className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => setEditingProjectPathKey(null)}
+                  className="shrink-0 p-1 text-muted hover:text-secondary outline-none"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  startEditProjectPath(agent.key, agent.project_relative_skills_dir)
+                }
+                className="group/projpath flex w-full items-center gap-1 truncate text-left text-[12px] font-mono leading-tight text-muted outline-none hover:text-secondary"
+                title={agent.project_relative_skills_dir ?? t("settings.projectSkillsPathDesc")}
+              >
+                <span className="truncate">
+                  {agent.project_relative_skills_dir
+                    ? t("settings.projectSkillsPathValue", {
+                        path: agent.project_relative_skills_dir,
+                      })
+                    : t("settings.projectSkillsPathEmpty")}
+                </span>
+                <Pencil className="h-2.5 w-2.5 shrink-0 opacity-0 transition-opacity group-hover/projpath:opacity-100" />
+              </button>
+            )
           )}
         </div>
       )}
     </div>
   );
+
 
   return (
     <div className="app-page app-page-narrow">
@@ -872,10 +977,87 @@ export function Settings() {
                 <p className="text-[13px] text-muted">{t("settings.repoPathDesc")}</p>
               </div>
               <div className="flex max-w-full flex-wrap items-center gap-2">
-                <div className="flex min-w-0 items-center gap-1.5 rounded-[4px] border border-border-subtle bg-background px-2 py-1">
-                  <Folder className="w-3 h-3 text-muted" />
-                  <span className="truncate text-[13px] font-mono text-tertiary">{displayedRepoPath}</span>
-                </div>
+                {editingCentralRepoPath ? (
+                  <div className="flex min-w-[320px] max-w-full items-center gap-1">
+                    <input
+                      type="text"
+                      value={centralRepoPathInput}
+                      onChange={(e) => setCentralRepoPathInput(e.target.value)}
+                      className="h-8 min-w-0 flex-1 rounded-[4px] border border-border-subtle bg-background px-2.5 text-[13px] font-mono text-secondary outline-none transition-colors focus:border-border"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void handleSaveCentralRepoPath();
+                        if (e.key === "Escape") {
+                          setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
+                          setEditingCentralRepoPath(false);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleBrowsePath(setCentralRepoPathInput)}
+                      disabled={savingCentralRepoPath}
+                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                      {t("settings.selectFolder")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveCentralRepoPath()}
+                      disabled={savingCentralRepoPath}
+                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-emerald-500/30 px-2.5 text-[13px] font-medium text-emerald-600 transition-colors outline-none hover:bg-emerald-500/5 disabled:opacity-60"
+                    >
+                      {savingCentralRepoPath ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Check className="w-3 h-3" />
+                      )}
+                      {t("common.save")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
+                        setEditingCentralRepoPath(false);
+                      }}
+                      disabled={savingCentralRepoPath}
+                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 items-center gap-1.5 rounded-[4px] border border-border-subtle bg-background px-2 py-1">
+                    <Folder className="w-3 h-3 text-muted" />
+                    <span className="truncate text-[13px] font-mono text-tertiary">{displayedRepoPath}</span>
+                  </div>
+                )}
+                {!editingCentralRepoPath && (
+                  <button
+                    type="button"
+                    onClick={handleStartEditCentralRepoPath}
+                    className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary"
+                  >
+                    <Pencil className="w-3 h-3" />
+                    {t("settings.changeDir")}
+                  </button>
+                )}
+                {!editingCentralRepoPath && centralRepoPathOverride && (
+                  <button
+                    type="button"
+                    onClick={() => void handleResetCentralRepoPath()}
+                    disabled={savingCentralRepoPath}
+                    className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                  >
+                    {savingCentralRepoPath ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3 h-3" />
+                    )}
+                    {t("settings.resetPath")}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleOpenRepoInFinder}
@@ -894,6 +1076,11 @@ export function Settings() {
                   )}
                   {t("settings.openInFinder")}
                 </button>
+              </div>
+              <div className="w-full text-[12px] text-muted">
+                {centralRepoPathOverride
+                  ? t("settings.repoPathCustomHint")
+                  : t("settings.repoPathDefaultHint")}
               </div>
             </div>
 
@@ -1021,16 +1208,19 @@ export function Settings() {
                 <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.defaultScenario")}</h3>
                 <p className="text-[13px] text-muted">{t("settings.defaultScenarioDesc")}</p>
               </div>
-              <select
-                value={defaultScenario}
-                onChange={(e) => handleDefaultScenarioChange(e.target.value)}
-                className={fieldClass}
-              >
-                <option value="">—</option>
-                {scenarios.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <div className="relative shrink-0">
+                <select
+                  value={defaultScenario}
+                  onChange={(e) => handleDefaultScenarioChange(e.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">—</option>
+                  {scenarios.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+              </div>
             </div>
 
             {/* Language */}
@@ -1040,15 +1230,18 @@ export function Settings() {
               </div>
               <div className="flex max-w-full flex-wrap items-center gap-2">
                 <Globe className="w-3.5 h-3.5 text-muted" />
-                <select
-                  value={i18n.language}
-                  onChange={(e) => handleLanguageChange(e.target.value)}
-                  className={fieldClass}
-                >
-                  <option value="zh">简体中文 (zh-CN)</option>
-                  <option value="zh-TW">繁體中文 (zh-TW)</option>
-                  <option value="en">English (en-US)</option>
-                </select>
+                <div className="relative">
+                  <select
+                    value={i18n.language}
+                    onChange={(e) => handleLanguageChange(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="zh">简体中文 (zh-CN)</option>
+                    <option value="zh-TW">繁體中文 (zh-TW)</option>
+                    <option value="en">English (en-US)</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                </div>
               </div>
             </div>
 

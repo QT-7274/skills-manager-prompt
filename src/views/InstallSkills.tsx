@@ -401,12 +401,16 @@ export function InstallSkills() {
     let unlisten: (() => void) | null = null;
 
     try {
-      unlisten = await listen<{ skill_id: string; phase: string }>(
+      unlisten = await listen<{ skill_id: string; phase: string; detail?: string }>(
         "install-progress",
         (event) => {
           if (event.payload.skill_id !== cancelKey) return;
           if (event.payload.phase === "cloning") {
-            toast.loading(t("install.toast.cloning"), { id: toastId });
+            const detail = event.payload.detail?.trim();
+            const msg = detail
+              ? `${t("install.toast.cloning")}\n${detail}`
+              : t("install.toast.cloning");
+            toast.loading(msg, { id: toastId });
           } else if (event.payload.phase === "installing") {
             toast.loading(t("install.toast.installing", { name: displayName }), { id: toastId });
           }
@@ -449,12 +453,16 @@ export function InstallSkills() {
     let unlisten: (() => void) | null = null;
 
     try {
-      unlisten = await listen<{ skill_id: string; phase: string }>(
+      unlisten = await listen<{ skill_id: string; phase: string; detail?: string }>(
         "install-progress",
         (event) => {
           if (event.payload.skill_id !== url) return;
           if (event.payload.phase === "cloning") {
-            toast.loading(t("install.toast.cloning"), { id: toastId });
+            const detail = event.payload.detail?.trim();
+            const msg = detail
+              ? `${t("install.toast.cloning")}\n${detail}`
+              : t("install.toast.cloning");
+            toast.loading(msg, { id: toastId });
           }
         }
       );

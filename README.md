@@ -21,45 +21,67 @@
 </p>
 
 <p align="center"><strong>My Skills</strong></p>
-<p align="center"><img src="assets/CleanShot_20260316_231111@2x.png" width="800" alt="My Skills" /></p>
+<p align="center"><img src="assets/CleanShot_20260419_003504@2x.png" width="800" alt="My Skills" /></p>
 
 <p align="center"><strong>Install Skills — Marketplace</strong></p>
 <p align="center"><img src="assets/CleanShot_20260316_231142@2x.png" width="800" alt="Install Skills Marketplace" /></p>
 
 <p align="center"><strong>Projects</strong></p>
-<p align="center"><img src="assets/CleanShot_20260316_231202@2x.png" width="800" alt="Projects" /></p>
+<p align="center"><img src="assets/CleanShot_20260419_003526@2x.png" width="800" alt="Projects" /></p>
 
 <p align="center"><strong>Settings</strong></p>
-<p align="center"><img src="assets/CleanShot_20260316_231216@2x.png" width="800" alt="Settings" /></p>
+<p align="center"><img src="assets/CleanShot_20260419_003825@2x.png" width="800" alt="Settings" /></p>
+
+<p align="center"><strong>Code Diff</strong></p>
+<p align="center"><img src="assets/CleanShot_20260419_003613@2x.png" width="800" alt="Code Diff" /></p>
+
+## QT Fork Additions
+
+This [QT-7274 fork](https://github.com/QT-7274/skills-manager-prompt) extends upstream with the following capabilities:
+
+- **AI assistance** — Pluggable AI provider (CodeBuddy SDK / any OpenAI-compatible endpoint). AI-generated tags, batch tagging across the whole library, AI-generated scenario prompts, and AI-generated recipes that bundle skills into ready-to-run workflow phases.
+- **Scenario prompt & recipes** — Edit a prompt template per scenario, then decompose it into Recipes (named sub-prompts tied to specific skill subsets). One-click copy a recipe's rendered prompt for use in any agent chat.
+- **Global vs. scenario sync scope** — Choose whether skill sync follows the active scenario or applies globally across all managed skills. Switch modes in Settings without re-importing anything.
+- **Bulk update & online match** — Batch "Update All" over Git/skills.sh skills with backend-side parallel updates. For local-imported skills, find the matching online version and convert them into trackable online sources.
+- **sm-tui terminal UI** — A lightweight terminal companion for browsing scenarios, copying recipe prompts, and triggering sync — keyboard (arrow/hjkl) and mouse both supported.
+- **Project workspace extras** — Empty project initialization flow, tag-filtered batch export, per-agent assignment while exporting, and an "Add Skills to Project" primary CTA that makes seeding a new project one click.
 
 ## Features
 
-- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo at `~/.skills-manager`.
+- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skills-manager` and can be customized in **Settings**.
 - **Marketplace + AI search** — Browse popular skills from the marketplace, run keyword search, or enable SkillsMP AI search with your API key.
 - **Multi-tool sync** — Sync skills to any supported tool via symlink or copy with a single click.
 - **Project Workspaces** — View and manage project-local skill folders for supported agents, compare them with your central library, and sync changes in either direction. Supports nested skill directories and per-agent assignment when exporting.
 - **Linked Workspaces** — Point to any directory as a skills root — useful for skills that live outside the default agent paths. Managed as a standalone workspace without participating in global scenario sync.
-- **Scenarios** — Group skills into scenarios, configure per-scenario agent toggles, drag to reorder enabled skills, and switch between setups instantly.
-- **Batch operations** — Multi-select skills for bulk enable/disable, export, or delete.
-- **Skill tagging and filters** — Tag skills, filter by source or tag, and narrow large libraries quickly.
+- **Scenarios** — Group skills into scenarios, configure per-scenario agent toggles, drag to reorder enabled skills, and switch between setups instantly from the left sidebar.
+- **Batch operations** — Multi-select skills for bulk enable/disable, export, or delete. Project Workspaces also support bulk enable/disable for project-local skills.
+- **Skill tagging and filters** — Tag skills, use tags to group similar skills, and filter by source or tag to narrow large libraries quickly.
 - **Update tracking** — Check for upstream updates on Git-based skills; re-import local ones.
 - **Skill preview and source inspection** — Read `SKILL.md` / `README.md`, inspect source metadata, and compare local content with the upstream version inside the app.
 - **Custom tools** — Add your own agents/tools with custom skills directories, or override the default path for any built-in tool.
 - **Git backup and restore** — Version-control your skill library with Git for backup and multi-machine sync, then restore snapshot versions from Version History when needed.
 - **Flexible app settings** — Configure repo path, sync mode, default scenario, theme, text size, language, tray behavior, proxy, Git remote, and update checks in one place.
 
+## Core Concepts
+
+- **Scenarios are global skill sets** — A scenario is your global set of enabled skills for a tool. For Claude Code, these skills are synced to `~/.claude/skills/`.
+- **Project Workspaces are project-local skill sets** — A project workspace manages the skills that live inside a specific project. For Claude Code, these skills are synced to `<project>/.claude/skills/`.
+- **Switch scenarios from the sidebar** — Click a scenario in the left sidebar to change the active global setup for your current workflow.
+- **Batch control works in both places** — You can bulk enable or disable skills in scenarios and in Project Workspaces.
+- **Tags are for grouping and filtering** — Use tags to label similar skills, then filter by tag to find the subset you want quickly.
+
 ## Quick Start
 
-1. Create or switch to a scenario for the workflow you want to use.
+1. Create a scenario or switch to one from the left sidebar.
 2. Install skills from local folders, Git repositories, archives, or the marketplace. If you have a SkillsMP API key, you can also turn on AI search.
-3. Open **My Skills** to decide which skills belong to the current scenario, tag them, review docs, and manage per-agent sync.
-4. Sync enabled skills to detected tools, or use **Project Workspaces** to compare project-local skills with your central library and move changes both ways.
+3. Open **My Skills** to decide which skills belong to the active scenario, tag them, review docs, and bulk enable or disable them.
+4. Sync enabled scenario skills to detected tools, or use **Project Workspaces** to manage project-local skills in `<project>/.claude/skills/`, including bulk enable/disable and two-way sync with your central library.
 5. Configure agent paths, custom tools, sync mode, default scenario, theme, language, proxy, and Git preferences in **Settings**.
 6. If you want history or multi-machine sync, set a Git remote in **Settings** and run **Start Backup** or **Sync to Git** from **My Skills**.
 
 ## Git Backup
 
-Back up `~/.skills-manager/skills/` to a Git repo for version history and multi-machine sync.
+Back up the `skills/` folder inside your current central repository to a Git repo for version history and multi-machine sync. By default this is `~/.skills-manager/skills/`.
 
 ### Quick setup
 
@@ -79,7 +101,7 @@ Each successful sync creates a snapshot version tag. You can open **Version Hist
 - SSH URL (`git@github.com:...`): requires SSH key configured on your machine and added to GitHub.
 - HTTPS URL (`https://github.com/...`): push usually requires a Personal Access Token (PAT).
 
-> **Note:** The SQLite database (`~/.skills-manager/skills-manager.db`) is not included in Git — it stores metadata that can be rebuilt by scanning the skill files.
+> **Note:** The SQLite database (`skills-manager.db` inside your current central repository, `~/.skills-manager/skills-manager.db` by default) is not included in Git — it stores metadata that can be rebuilt by scanning the skill files.
 
 ## Supported Tools
 

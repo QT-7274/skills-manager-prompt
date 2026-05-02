@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { StatusBanner } from "./StatusBanner";
+import { CommandPalette } from "./CommandPalette";
 import { useApp } from "../context/AppContext";
 import { useTranslation } from "react-i18next";
 import { useDragWindow } from "../hooks/useDragWindow";
@@ -27,7 +28,7 @@ export function Layout() {
   }, [navigate]);
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden bg-background text-primary">
+    <div className="relative flex h-full w-full overflow-hidden bg-background text-primary">
       {/* Full-width top drag bar — spans sidebar + content, with bottom divider */}
       <div
         onMouseDown={onDrag}
@@ -51,6 +52,7 @@ export function Layout() {
           </div>
         </div>
       </div>
+      <CommandPalette />
     </div>
   );
 }

@@ -1,9 +1,12 @@
-import { Trash2, CheckCircle2, Circle, Sparkles, Loader2 } from "lucide-react";
+import { Trash2, CheckCircle2, Circle, Sparkles, Loader2, RotateCcw, Tag, Download, Upload } from "lucide-react";
 import { cn } from "../utils";
 
 interface MultiSelectToolbarLabels {
   hint: string;
   selected: string;
+  update?: string;
+  updateProject?: string;
+  updateCenter?: string;
   delete: string;
   enable: string;
   disable: string;
@@ -11,34 +14,55 @@ interface MultiSelectToolbarLabels {
   deselectAll: string;
   cancel: string;
   aiTag?: string;
+  editTags?: string;
 }
 
 interface MultiSelectToolbarProps {
   selectedCount: number;
   isAllSelected: boolean;
   anyDisabled: boolean;
+  anyUpdatable?: boolean;
+  anyCanUpdateProject?: boolean;
+  anyCanUpdateCenter?: boolean;
   showToggle: boolean;
+  updating?: boolean;
+  updatingProject?: boolean;
+  updatingCenter?: boolean;
   labels: MultiSelectToolbarLabels;
+  onUpdate?: () => void;
+  onUpdateProject?: () => void;
+  onUpdateCenter?: () => void;
   onDelete: () => void;
   onToggle: () => void;
   onSelectAll: () => void;
   onCancel: () => void;
   onAiTag?: () => void;
   aiTagging?: boolean;
+  onEditTags?: () => void;
 }
 
 export function MultiSelectToolbar({
   selectedCount,
   isAllSelected,
   anyDisabled,
+  anyUpdatable = false,
+  anyCanUpdateProject = false,
+  anyCanUpdateCenter = false,
   showToggle,
+  updating = false,
+  updatingProject = false,
+  updatingCenter = false,
   labels,
+  onUpdate,
+  onUpdateProject,
+  onUpdateCenter,
   onDelete,
   onToggle,
   onSelectAll,
   onCancel,
   onAiTag,
   aiTagging,
+  onEditTags,
 }: MultiSelectToolbarProps) {
   return (
     <div className="flex items-center gap-2 px-1 py-1.5">
@@ -47,6 +71,45 @@ export function MultiSelectToolbar({
       </span>
       {selectedCount > 0 && (
         <>
+          {anyUpdatable && labels.update && onUpdate && (
+            <button
+              onClick={onUpdate}
+              disabled={updating}
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+            >
+              <RotateCcw className={cn("h-3.5 w-3.5", updating && "animate-spin")} />
+              {labels.update}
+            </button>
+          )}
+          {anyCanUpdateProject && labels.updateProject && onUpdateProject && (
+            <button
+              onClick={onUpdateProject}
+              disabled={updatingProject}
+              className="inline-flex items-center gap-1.5 rounded-md bg-sky-600/90 px-2.5 py-1 text-[13px] font-medium text-white hover:bg-sky-500 transition-colors disabled:opacity-50"
+            >
+              <Download className={cn("h-3.5 w-3.5", updatingProject && "animate-spin")} />
+              {labels.updateProject}
+            </button>
+          )}
+          {anyCanUpdateCenter && labels.updateCenter && onUpdateCenter && (
+            <button
+              onClick={onUpdateCenter}
+              disabled={updatingCenter}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-600/90 px-2.5 py-1 text-[13px] font-medium text-white hover:bg-amber-500 transition-colors disabled:opacity-50"
+            >
+              <Upload className={cn("h-3.5 w-3.5", updatingCenter && "animate-spin")} />
+              {labels.updateCenter}
+            </button>
+          )}
+          {onEditTags && labels.editTags && (
+            <button
+              onClick={onEditTags}
+              className="inline-flex items-center gap-1.5 rounded-md bg-violet-600/90 px-2.5 py-1 text-[13px] font-medium text-white hover:bg-violet-500 transition-colors"
+            >
+              <Tag className="h-3.5 w-3.5" />
+              {labels.editTags}
+            </button>
+          )}
           <button
             onClick={onDelete}
             className="inline-flex items-center gap-1.5 rounded-md bg-red-600/90 px-2.5 py-1 text-[13px] font-medium text-white hover:bg-red-500 transition-colors"
