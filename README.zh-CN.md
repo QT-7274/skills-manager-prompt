@@ -189,15 +189,18 @@ npm run cli:build
 
 ## 常见问题
 
-### macOS 提示"应用已损坏，无法打开"
+### macOS 首次启动被 Gatekeeper 拦截
 
-下载应用后如果出现此提示，在终端执行以下命令后重新打开即可：
+Skills Manager 使用 ad-hoc 签名，未做 Apple 公证（没有付费的 Apple Developer ID），所以首次打开会被 macOS Gatekeeper 提示。
 
-```bash
-xattr -cr /Applications/skills-manager.app
-```
+- **"无法打开，因为无法验证开发者"**（v1.20.0 及之后版本）—— 在访达里右键点击应用，选择 **打开**，再在弹窗里确认即可。也可以打开 **系统设置 → 隐私与安全性**，第一次启动失败后会出现 **仍要打开** 按钮。
+- **"应用已损坏，无法打开"**（v1.19.0 及之前版本）—— 在终端执行下面这条命令后重新打开应用即可：
 
-如果 `.app` 不在 `/Applications`，请替换为实际路径。
+  ```bash
+  xattr -cr /Applications/skills-manager.app
+  ```
+
+  如果 `.app` 不在 `/Applications`，请替换为实际路径。
 
 ## License
 

@@ -198,15 +198,18 @@ npm run cli:build
 
 ## Troubleshooting
 
-### macOS: "App is damaged and can't be opened"
+### macOS: Gatekeeper blocks the app on first launch
 
-If you see this error after downloading the app, run the following command in Terminal and then open the app again:
+Skills Manager is ad-hoc signed but not notarized (no paid Apple Developer ID), so macOS Gatekeeper will warn the first time you open it.
 
-```bash
-xattr -cr /Applications/skills-manager.app
-```
+- **"App can't be opened because it is from an unidentified developer"** (releases from v1.20.0 onward) — Right-click the app in Finder and choose **Open**, then confirm in the dialog. Or open **System Settings → Privacy & Security** and click **Open Anyway** after the first failed launch.
+- **"App is damaged and can't be opened"** (releases up to and including v1.19.0) — Run this in Terminal, then open the app again:
 
-Replace the path with wherever you placed the `.app` file if it's not in `/Applications`.
+  ```bash
+  xattr -cr /Applications/skills-manager.app
+  ```
+
+  Replace the path with wherever you placed the `.app` file if it's not in `/Applications`.
 
 ## License
 
