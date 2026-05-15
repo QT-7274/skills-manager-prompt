@@ -177,6 +177,11 @@ export const setToolEnabled = (key: string, enabled: boolean) =>
 export const setAllToolsEnabled = (enabled: boolean) =>
   invoke<void>("set_all_tools_enabled", { enabled });
 
+export const getToolOrder = () => invoke<string[]>("get_tool_order_cmd");
+
+export const setToolOrder = (order: string[]) =>
+  invoke<void>("set_tool_order_cmd", { order });
+
 export const setCustomToolPath = (key: string, path: string) =>
   invoke<void>("set_custom_tool_path", { key, path });
 
@@ -242,7 +247,8 @@ export const installGit = (repoUrl: string, name?: string) =>
   invoke<void>("install_git", { repoUrl, name: name || null });
 
 export interface GitSkillPreview {
-  dir_name: string;
+  /** Path relative to the resolved scan root, using `/` separators. Stable key. */
+  rel_path: string;
   name: string;
   description: string | null;
 }
@@ -253,7 +259,7 @@ export interface GitPreviewResult {
 }
 
 export interface SkillInstallItem {
-  dir_name: string;
+  rel_path: string;
   name: string;
 }
 
@@ -701,3 +707,17 @@ export const deleteProjectSkill = (projectId: string, skillRelativePath: string,
 
 export const slugifySkillNames = (names: string[]) =>
   invoke<string[]>("slugify_skill_names", { names });
+
+// ── Agent Local Workspace ──
+
+export const getGlobalLocalSkills = (agent: string) =>
+  invoke<ProjectSkill[]>("get_global_local_skills", { agent });
+
+export const getGlobalLocalSkillDocument = (agent: string, skillRelativePath: string) =>
+  invoke<ProjectSkillDocument>("get_global_local_skill_document", { agent, skillRelativePath });
+
+export const importGlobalLocalSkillToCenter = (agent: string, skillRelativePath: string) =>
+  invoke<void>("import_global_local_skill_to_center", { agent, skillRelativePath });
+
+export const updateGlobalLocalSkillFromCenter = (agent: string, skillRelativePath: string) =>
+  invoke<void>("update_global_local_skill_from_center", { agent, skillRelativePath });

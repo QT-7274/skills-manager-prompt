@@ -1,4 +1,3 @@
-use rayon::prelude::*;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -6,10 +5,10 @@ use tauri::{Emitter, State};
 
 use crate::core::{
     error::AppError,
-    skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
-    sync_engine, sync_metadata, tool_adapters,
+    scenario_service,
+    skill_store::{ScenarioRecord, SkillStore},
+    sync_engine, sync_metadata,
 };
-use std::collections::{HashMap, HashSet};
 
 fn refresh_tray_menu_best_effort(app: &tauri::AppHandle) {
     if let Err(err) = crate::refresh_tray_menu(app) {
@@ -24,106 +23,7 @@ pub(crate) fn sync_skill_to_active_scenario(
     scenario_id: &str,
     skill_id: &str,
 ) -> Result<(), AppError> {
-    if let Ok(Some(active_id)) = store.get_active_scenario_id() {
-        if active_id == scenario_id {
-            let adapters =
-                enabled_installed_adapters_for_scenario_skill(store, scenario_id, skill_id)?;
-            let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
-            let Ok(Some(skill)) = store.get_skill_by_id(skill_id) else {
-                return Ok(());
-            };
-            let source = PathBuf::from(&skill.central_path);
-            let target_name = sync_engine::target_dir_name(&source, &skill.name);
-            let old_targets = store
-                .get_targets_for_skill(skill_id)
-                .map_err(AppError::db)?;
-            for adapter in &adapters {
-                // Remove stale target from a previous sync if the skill name changed
-                if let Some(old) = old_targets.iter().find(|t| t.tool == adapter.key) {
-                    let old_path = PathBuf::from(&old.target_path);
-                    if old_path != adapter.skills_dir().join(&target_name) {
-                        if let Err(e) = sync_engine::remove_target(&old_path) {
-                            log::warn!("Failed to remove stale target {}: {e}", old_path.display());
-                        }
-                        let _ = store.delete_target(skill_id, &adapter.key);
-                    }
-                }
-
-                let target = adapter.skills_dir().join(&target_name);
-                let mode =
-                    sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
-                match sync_engine::sync_skill(&source, &target, mode) {
-                    Ok(actual_mode) => {
-                        let now = chrono::Utc::now().timestamp_millis();
-                        let target_record = crate::core::skill_store::SkillTargetRecord {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            skill_id: skill_id.to_string(),
-                            tool: adapter.key.clone(),
-                            target_path: target.to_string_lossy().to_string(),
-                            mode: actual_mode.as_str().to_string(),
-                            status: "ok".to_string(),
-                            synced_at: Some(now),
-                            last_error: None,
-                        };
-                        if let Err(e) = store.insert_target(&target_record) {
-                            log::warn!("Failed to insert sync target for skill {skill_id}: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to sync skill {skill_id} to {}: {e}",
-                            target.display()
-                        );
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ensure_scenario_exists(store: &SkillStore, scenario_id: &str) -> Result<(), AppError> {
-    let exists = store
-        .get_all_scenarios()
-        .map_err(AppError::db)?
-        .iter()
-        .any(|s| s.id == scenario_id);
-    if !exists {
-        return Err(AppError::not_found("Scenario not found"));
-    }
-    Ok(())
-}
-
-pub(crate) fn enabled_installed_adapters_for_scenario_skill(
-    store: &SkillStore,
-    scenario_id: &str,
-    skill_id: &str,
-) -> Result<Vec<tool_adapters::ToolAdapter>, AppError> {
-    let adapters = tool_adapters::enabled_installed_adapters(store);
-    let adapter_keys: Vec<String> = adapters.iter().map(|a| a.key.clone()).collect();
-
-    store
-        .ensure_scenario_skill_tool_defaults(scenario_id, skill_id, &adapter_keys)
-        .map_err(AppError::db)?;
-
-    let enabled = store
-        .get_enabled_tools_for_scenario_skill(scenario_id, skill_id)
-        .map_err(AppError::db)?;
-    let enabled_set: HashSet<String> = enabled.into_iter().collect();
-
-    Ok(adapters
-        .into_iter()
-        .filter(|adapter| enabled_set.contains(&adapter.key))
-        .collect())
-}
-
-#[derive(Debug, Clone)]
-struct ScenarioSyncTarget {
-    skill_id: String,
-    tool: String,
-    source: PathBuf,
-    target: PathBuf,
-    mode: sync_engine::SyncMode,
+    scenario_service::sync_skill_to_active_scenario(store, scenario_id, skill_id)
 }
 
 #[derive(Debug, Serialize)]
@@ -365,16 +265,20 @@ async fn apply_scenario_to_default_impl(
     let id_bg = id.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_scenario_exists(&store, &id)?;
+        scenario_service::ensure_scenario_exists(&store, &id)?;
 
         if !is_global {
             // Collect desired targets for the new scenario so we can remove only
             // targets that are no longer needed (shared targets are preserved).
-            let desired_targets = collect_scenario_sync_targets(&store, &id)?;
+            let desired_targets = scenario_service::collect_scenario_sync_targets(&store, &id)?;
             if let Ok(Some(old_id)) = store.get_active_scenario_id() {
                 if old_id != id {
                     let t0 = std::time::Instant::now();
-                    unsync_obsolete_scenario_targets(&store, &old_id, &desired_targets)?;
+                    scenario_service::unsync_obsolete_scenario_targets(
+                        &store,
+                        &old_id,
+                        &desired_targets,
+                    )?;
                     log::info!("unsync_obsolete_scenario_targets took {:?}", t0.elapsed());
                 }
             }
@@ -552,308 +456,24 @@ pub async fn reorder_scenario_skills(
 // ── Internal helpers ──
 
 pub(crate) fn sync_scenario_skills(store: &SkillStore, scenario_id: &str) -> Result<(), AppError> {
-    let desired_targets = collect_scenario_sync_targets(store, scenario_id)?;
-    sync_desired_targets(store, &desired_targets)
-}
-
-fn collect_scenario_sync_targets(
-    store: &SkillStore,
-    scenario_id: &str,
-) -> Result<Vec<ScenarioSyncTarget>, AppError> {
-    let skills = store
-        .get_skills_for_scenario(scenario_id)
-        .map_err(AppError::db)?;
-    let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
-    let mut targets = Vec::new();
-
-    for skill in &skills {
-        let source = PathBuf::from(&skill.central_path);
-        let target_name = sync_engine::target_dir_name(&source, &skill.name);
-        let adapters =
-            enabled_installed_adapters_for_scenario_skill(store, scenario_id, &skill.id)?;
-        for adapter in &adapters {
-            let target = adapter.skills_dir().join(&target_name);
-            let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
-            targets.push(ScenarioSyncTarget {
-                skill_id: skill.id.clone(),
-                tool: adapter.key.clone(),
-                source: source.clone(),
-                target,
-                mode,
-            });
-        }
-    }
-
-    Ok(targets)
-}
-
-fn sync_desired_targets(
-    store: &SkillStore,
-    desired_targets: &[ScenarioSyncTarget],
-) -> Result<(), AppError> {
-    let existing_targets: HashMap<(String, String), SkillTargetRecord> = store
-        .get_all_targets()
-        .map_err(AppError::db)?
-        .into_iter()
-        .map(|target| ((target.skill_id.clone(), target.tool.clone()), target))
-        .collect();
-
-    for desired in desired_targets {
-        let key = (desired.skill_id.clone(), desired.tool.clone());
-        if let Some(existing) = existing_targets.get(&key) {
-            let target_path = PathBuf::from(&existing.target_path);
-            if target_path != desired.target {
-                if let Err(e) = sync_engine::remove_target(&target_path) {
-                    log::warn!(
-                        "Failed to remove stale target {}: {e}",
-                        target_path.display()
-                    );
-                }
-                if let Err(e) = store.delete_target(&desired.skill_id, &desired.tool) {
-                    log::warn!(
-                        "Failed to delete stale target record for skill {}, tool {}: {e}",
-                        desired.skill_id,
-                        desired.tool
-                    );
-                }
-            } else if existing.mode == desired.mode.as_str()
-                && existing.status == "ok"
-                && sync_engine::is_target_current(&desired.source, &desired.target, desired.mode)
-            {
-                continue;
-            }
-        }
-
-        match sync_engine::sync_skill(&desired.source, &desired.target, desired.mode) {
-            Ok(actual_mode) => {
-                let now = chrono::Utc::now().timestamp_millis();
-                let target_record = SkillTargetRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    skill_id: desired.skill_id.clone(),
-                    tool: desired.tool.clone(),
-                    target_path: desired.target.to_string_lossy().to_string(),
-                    mode: actual_mode.as_str().to_string(),
-                    status: "ok".to_string(),
-                    synced_at: Some(now),
-                    last_error: None,
-                };
-                if let Err(e) = store.insert_target(&target_record) {
-                    log::warn!(
-                        "Failed to insert sync target for skill {}: {e}",
-                        desired.skill_id
-                    );
-                }
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to sync skill {} to {}: {e}",
-                    desired.skill_id,
-                    desired.target.display()
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn unsync_obsolete_scenario_targets(
-    store: &SkillStore,
-    old_scenario_id: &str,
-    desired_targets: &[ScenarioSyncTarget],
-) -> Result<(), AppError> {
-    let desired_paths: HashMap<(String, String), PathBuf> = desired_targets
-        .iter()
-        .map(|target| {
-            (
-                (target.skill_id.clone(), target.tool.clone()),
-                target.target.clone(),
-            )
-        })
-        .collect();
-
-    let old_skill_ids = store
-        .get_skill_ids_for_scenario(old_scenario_id)
-        .map_err(AppError::db)?;
-    for skill_id in &old_skill_ids {
-        let targets = store
-            .get_targets_for_skill(skill_id)
-            .map_err(AppError::db)?;
-        for target in &targets {
-            let path = PathBuf::from(&target.target_path);
-            let key = (skill_id.clone(), target.tool.clone());
-            if desired_paths.get(&key) == Some(&path) {
-                continue;
-            }
-
-            if let Err(e) = sync_engine::remove_target(&path) {
-                log::warn!("Failed to remove sync target {}: {e}", path.display());
-            }
-            if let Err(e) = store.delete_target(skill_id, &target.tool) {
-                log::warn!(
-                    "Failed to delete target record for skill {skill_id}, tool {}: {e}",
-                    target.tool
-                );
-            }
-        }
-    }
-
-    Ok(())
+    scenario_service::sync_scenario_skills(store, scenario_id)
 }
 
 pub(crate) fn unsync_scenario_skills(
     store: &SkillStore,
     scenario_id: &str,
 ) -> Result<(), AppError> {
-    let skill_ids = store
-        .get_skill_ids_for_scenario(scenario_id)
-        .map_err(AppError::db)?;
-    if skill_ids.is_empty() {
-        return Ok(());
-    }
-
-    // 1. Batch query: get all targets for all skills at once
-    let all_targets = store
-        .get_targets_for_skills(&skill_ids)
-        .map_err(AppError::db)?;
-
-    // 2. Parallel file removal
-    all_targets.par_iter().for_each(|target| {
-        let path = PathBuf::from(&target.target_path);
-        if let Err(e) = sync_engine::remove_target(&path) {
-            log::warn!("Failed to remove sync target {}: {e}", path.display());
-        }
-    });
-
-    // 3. Batch delete DB records in one transaction
-    if let Err(e) = store.delete_targets_for_skills_batch(&skill_ids) {
-        log::warn!("Failed to batch-delete target records: {e}");
-    }
-
-    Ok(())
+    scenario_service::unsync_scenario_skills(store, scenario_id)
 }
 
 /// Sync ALL managed skills to all enabled/installed tool adapters (global mode).
 pub(crate) fn sync_all_skills(store: &SkillStore) -> Result<(), AppError> {
-    let t_total = std::time::Instant::now();
-
-    let skills = store.get_all_skills().map_err(AppError::db)?;
-    if skills.is_empty() {
-        return Ok(());
-    }
-
-    let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
-    let all_adapters = tool_adapters::enabled_installed_adapters(store);
-
-    // Pre-create adapter skills directories
-    for adapter in &all_adapters {
-        let skills_dir = adapter.skills_dir();
-        if let Some(parent) = skills_dir.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-    }
-
-    // Build sync tasks: every skill × every adapter
-    struct SyncTask {
-        source: PathBuf,
-        target: PathBuf,
-        mode: sync_engine::SyncMode,
-        skill_id: String,
-        tool_key: String,
-    }
-
-    let mut sync_tasks = Vec::new();
-    for skill in &skills {
-        let source = PathBuf::from(&skill.central_path);
-        for adapter in &all_adapters {
-            let target = adapter
-                .skills_dir()
-                .join(sync_engine::target_dir_name(&source, &skill.name));
-            let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
-            sync_tasks.push(SyncTask {
-                source: source.clone(),
-                target,
-                mode,
-                skill_id: skill.id.clone(),
-                tool_key: adapter.key.clone(),
-            });
-        }
-    }
-    log::info!(
-        "[sync_all] {} tasks ({} skills × {} adapters)",
-        sync_tasks.len(),
-        skills.len(),
-        all_adapters.len()
-    );
-
-    // Parallel file sync
-    let sync_results: Vec<_> = sync_tasks
-        .par_iter()
-        .map(|task| {
-            let result = sync_engine::sync_skill_fast(&task.source, &task.target, task.mode);
-            (task, result)
-        })
-        .collect();
-
-    // Batch insert target records
-    let now = chrono::Utc::now().timestamp_millis();
-    let target_records: Vec<SkillTargetRecord> = sync_results
-        .iter()
-        .filter_map(|(task, result)| match result {
-            Ok(actual_mode) => Some(SkillTargetRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                skill_id: task.skill_id.clone(),
-                tool: task.tool_key.clone(),
-                target_path: task.target.to_string_lossy().to_string(),
-                mode: actual_mode.as_str().to_string(),
-                status: "ok".to_string(),
-                synced_at: Some(now),
-                last_error: None,
-            }),
-            Err(e) => {
-                log::warn!(
-                    "Failed to sync skill {} to {}: {e}",
-                    task.skill_id,
-                    task.target.display()
-                );
-                None
-            }
-        })
-        .collect();
-
-    if let Err(e) = store.insert_targets_batch(&target_records) {
-        log::warn!("Failed to batch-insert sync targets: {e}");
-    }
-    log::info!("[sync_all] TOTAL: {:?}", t_total.elapsed());
-
-    Ok(())
+    scenario_service::sync_all_skills(store)
 }
 
 /// Remove ALL sync targets from the filesystem and database.
 fn unsync_all_skills(store: &SkillStore) -> Result<(), AppError> {
-    let all_targets = store.get_all_targets().map_err(AppError::db)?;
-
-    all_targets.par_iter().for_each(|target| {
-        let path = PathBuf::from(&target.target_path);
-        if let Err(e) = sync_engine::remove_target(&path) {
-            log::warn!("Failed to remove sync target {}: {e}", path.display());
-        }
-    });
-
-    // Delete all target records — collect all unique skill IDs
-    let skill_ids: Vec<String> = all_targets
-        .iter()
-        .map(|t| t.skill_id.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    if !skill_ids.is_empty() {
-        if let Err(e) = store.delete_targets_for_skills_batch(&skill_ids) {
-            log::warn!("Failed to batch-delete target records: {e}");
-        }
-    }
-
-    Ok(())
+    scenario_service::unsync_all_skills(store)
 }
 
 #[tauri::command]
@@ -906,7 +526,7 @@ pub async fn save_scenario_prompt_template(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_scenario_exists(&store, &scenario_id)?;
+        scenario_service::ensure_scenario_exists(&store, &scenario_id)?;
         store
             .save_scenario_prompt_template(&scenario_id, template.as_deref())
             .map_err(AppError::db)
@@ -931,8 +551,11 @@ pub async fn get_scenario_prompt_template(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::scenario_service::{
+        collect_scenario_sync_targets, sync_desired_targets, unsync_obsolete_scenario_targets,
+    };
     use crate::core::skill_store::SkillRecord;
-    use crate::core::tool_adapters::CustomToolDef;
+    use crate::core::tool_adapters::{self, CustomToolDef};
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;

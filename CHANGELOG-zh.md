@@ -5,6 +5,47 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.19.1] - 2026-05-15
+
+### 修复
+- **macOS 首次打开提示「应用已损坏」** — CI 构建的 release 包现在会做 ad-hoc 签名，下载 `.dmg` 后不再触发 Gatekeeper 的「已损坏」警告，无需手动执行 `xattr -cr`（#138）。
+- **老版本 macOS 打开技能详情时黑屏** — 技能详情侧边面板改用显式 stacking，修复 Monterey / 旧版 WKWebView 上面板渲染为黑色遮罩的回归问题（#69, #144）。
+- **从嵌套分类目录导入 git 技能** — git 技能导入现在会递归扫描嵌套分类目录，而不是只看顶层文件夹，便于按子分类组织的技能仓库正确导入（#121）。
+## [1.19.0] - 2026-05-13
+
+### 新增
+- **Global Workspace 显示 Agent 本地 Skills**：每个 Agent 的页面现在会列出其全局目录里的所有 Skills，包括不是通过 Skills Manager 安装的。可按 Agent 把仅存在于本地的 Skill 上传到中央库、把库里的更新拉取到本地副本，或移除已纳管的 Skill；列表支持搜索和标签筛选。
+
+### 变更
+- **在卡片上直接安装 Skill**：每张 Skill 卡片现在会为每个已启用 Agent 显示一个图标角标（取代原来的两字母标签）。点击角标即可直接在卡片上为该 Agent 安装或移除这个 Skill，操作时角标会实时反映同步状态并显示加载动画。
+- **可自定义 Agent 顺序**：设置页支持在每个分组（主流 / 更多 / 自定义）内拖拽调整 Agent 顺序，这个顺序会应用到所有出现 Agent 的地方 —— 卡片角标、工作区列表、开关等。
+- **统一 Skill 卡片点击行为**：在技能库、Global Workspace 和项目工作区中，点击卡片任意位置都会打开详情面板；卡片上的操作按钮不再同时触发卡片点击。
+- **帮助弹窗**：新增「全局工作区」一项，并更新了「技能库」和「设置」两项的说明，覆盖新的 Agent 图标角标和 Agent 排序。
+
+### 修复
+- **OpenCode 项目 Skills 路径**：OpenCode 的项目级 Skills 现在会安装到 `<project>/.opencode/skills/`（OpenCode 实际读取的位置），而不是之前的 `<project>/.config/opencode/skills/`。
+- **打开 Global Workspace 的 Agent 页面不再重复刷新多次**：Agent 本地 Skills 列表每个 Agent 只加载一次，且上一个 Agent 残留的慢请求不会再覆盖当前页面的数据。
+- **CLI 加固**：设置 `--json` 时 `skills-manager-cli` 现在会返回 JSON 错误信封（包括参数解析错误），拒绝克隆到非空且非 git 的目录，设置 5 秒的 SQLite busy timeout 以避免与桌面应用同时使用时立即失败，并在 Windows 上正确处理 `PATH`。
+
+## [1.18.0] - 2026-05-09
+
+### 变更
+- **场景更名为 Preset**：应用内的“场景 / Scenario”已统一更名为 Preset，覆盖界面标签、侧边栏、设置、帮助和多语言文案。已有场景会以 Preset 形式继续使用，不需要迁移数据。
+- **Preset bar 取代“应用 Preset”弹窗**：Preset 现在以内联标签形式显示在 Global Workspace 和 Project Workspace 的搜索/标签筛选下方。点击标签即可为当前 Agent 范围启用或移除该 Preset 的全部 Skills；已启用会显示 ✓，部分安装会显示已安装/总数。
+- **Global Workspace 重设计**：每个 Agent 都有独立页面，可从侧边栏进入；固定的 **全部 Agents** 入口可一次管理所有已安装 Agent。每个 Agent 页面都支持标签筛选、多选和批量移除。
+- **侧边栏改进**：Preset 和项目工作区分组支持折叠；Global Workspace 中的 Agent 支持拖拽排序。
+- **新增 Agent 图标**：内置 Agent 现在会在设置、Global Workspace、项目弹窗和 Agent 开关中显示对应图标，多 Agent 列表更容易识别。
+- **更多 Preset 图标**：Preset 图标选择器新增 Agents、CLI、数据、分析、研究、安全、自动化、基础设施、实验等更多选项。
+
+## [1.17.0] - 2026-05-07
+
+### 新增
+- 新增面向 agent 的命令行工具 `skills-manager-cli`，无需打开桌面应用即可操作 skills 仓库 —— 列出/查看/导出技能、预览/应用 scenario、执行 git 备份命令。支持 `--json` 输出和 `--skills-root` 直接指向任意已克隆的 skills 目录。可通过 `npm run cli:install` 安装到 PATH。
+
+### 修复
+- Git 备份：Windows 下克隆远端 skills 仓库不再因仓库锁阻塞而失败 —— 锁文件已移到 skills 目录之外，克隆目标可以保持空目录。
+- CLI：`--skills-root` 不再把 `skills-manager.db` 等管理状态写到 skills 目录的父级，每个外部目录的状态现在统一放在 `~/.skills-manager/external/` 下，按 skills 根目录的规范化路径分目录隔离。
+
 ## [1.16.1] - 2026-05-01
 
 ### 变更
