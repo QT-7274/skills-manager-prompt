@@ -41,9 +41,16 @@ fn is_symlink_to_central(path: &Path) -> bool {
     false
 }
 
-/// Recursively walk `dir` and collect all subdirectories that contain SKILL.md.
-/// Stops descending when a skill dir is found (skills don't nest). Guards
-/// against symlink cycles via a canonical-path visited set.
+/// Recursively walk `dir` and return all subdirectories that contain SKILL.md.
+/// Stops descending when a skill dir is found (skills don't nest). Skips
+/// `.git` / `node_modules` / `.hub` and guards against symlink cycles.
+pub fn collect_skill_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    let mut visited = HashSet::new();
+    collect_skill_dirs_recursive(dir, &mut visited, &mut results);
+    results
+}
+
 fn collect_skill_dirs_recursive(
     dir: &Path,
     visited: &mut HashSet<PathBuf>,
@@ -347,6 +354,7 @@ mod tests {
             override_skills_dir: Some(tmp.path().to_string_lossy().to_string()),
             is_custom: true,
             recursive_scan: false,
+            project_relative_skills_dir: None,
         };
 
         let plan = scan_local_skills_with_adapters(&[], &[adapter]).unwrap();
@@ -374,6 +382,7 @@ mod tests {
             override_skills_dir: Some(primary.to_string_lossy().to_string()),
             is_custom: true,
             recursive_scan: false,
+            project_relative_skills_dir: None,
         };
 
         let adapter_with_extra = tool_adapters::ToolAdapter {

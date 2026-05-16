@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc::Sender, Mutex, OnceLock};
 use std::sync::Arc;
+use std::sync::{mpsc::Sender, Mutex, OnceLock};
 use std::time::Duration;
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -72,15 +72,15 @@ fn collect_watch_paths_for_adapters(
             let project_path = PathBuf::from(&project.path);
             seen_dirs.clear();
             for adapter in &adapters {
-                if adapter.relative_skills_dir.is_empty() {
+                let project_dir = adapter.project_relative_skills_dir();
+                if project_dir.is_empty() {
                     continue;
                 }
-                if !seen_dirs.insert(adapter.relative_skills_dir.clone()) {
+                if !seen_dirs.insert(project_dir.to_string()) {
                     continue;
                 }
-                let skills_dir = project_path.join(&adapter.relative_skills_dir);
-                let disabled_dir =
-                    project_path.join(format!("{}-disabled", &adapter.relative_skills_dir));
+                let skills_dir = project_path.join(project_dir);
+                let disabled_dir = project_path.join(format!("{}-disabled", project_dir));
                 // Watch the parent directory so we detect creation of new skills dirs.
                 if let Some(parent) = skills_dir.parent() {
                     paths.push(parent.to_path_buf());
@@ -265,6 +265,7 @@ mod tests {
             override_skills_dir: Some(primary_dir.to_string_lossy().to_string()),
             is_custom: true,
             recursive_scan: false,
+            project_relative_skills_dir: None,
         }];
 
         let paths = collect_watch_paths_for_adapters(&store, adapters);

@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] - 2026-05-15
+
+### Fixed
+- **macOS "app is damaged" error on first launch** — Release builds are now ad-hoc signed in CI, so downloading the `.dmg` no longer triggers the Gatekeeper "damaged" warning that forced users to run `xattr -cr` manually (#138).
+- **Black screen when opening a skill detail on older macOS** — The skill detail sheet now uses explicit stacking, fixing a regression where the panel rendered as a black overlay on Monterey/older WKWebView versions (#69, #144).
+- **Importing skills from nested category folders** — `git` skill import now walks nested category directories instead of only looking at top-level folders, so repos that organize skills under subcategories import correctly (#121).
+## [1.19.0] - 2026-05-13
+
+### Added
+- **Agent-local skills in Global Workspace** — Each agent's page now lists every skill in its global folder, including ones installed outside Skills Manager. Per agent you can upload a local-only skill into your central library, pull library updates down to a local copy, or remove a managed one — with search and tag filtering on the list.
+
+### Changed
+- **Install skills straight from the card** — Every skill card now shows an agent icon badge for each enabled agent (replacing the old two-letter labels). Click a badge to install or remove that skill for that agent right from the card; the badge shows live sync state with a spinner while the change is applied.
+- **Customizable agent order** — Settings lets you drag to reorder agents within each group (mainstream / more / custom), and that order is used everywhere agents appear — skill card badges, workspace lists, and toggles.
+- **Unified skill-card click** — Clicking anywhere on a skill card opens its detail panel in the Library, Global Workspace, and Project Workspace; action buttons no longer also trigger the card click.
+- **Help dialog** — Added a "Global Workspace" entry and refreshed the Library and Settings entries to cover the new agent icon badges and agent reordering.
+
+### Fixed
+- **OpenCode project skills path** — Project-level skills for OpenCode are now installed to `<project>/.opencode/skills/`, where OpenCode actually reads them, instead of `<project>/.config/opencode/skills/`.
+- **Opening an agent in Global Workspace no longer reloads the page several times** — the agent-local skills list is fetched once per agent, and a slow request left over from a previously selected agent can no longer overwrite the current one.
+- **CLI hardening** — `skills-manager-cli` now returns JSON error envelopes when `--json` is set (including argument-parse errors), refuses to clone into a non-empty non-git directory, sets a 5-second SQLite busy timeout so running it alongside the desktop app doesn't fail immediately, and handles `PATH` correctly on Windows.
+
+## [1.18.0] - 2026-05-09
+
+### Changed
+
+- **Scenarios renamed to Presets** — "场景 / Scenario" has been renamed to "Preset" throughout the app (UI labels, sidebar, settings, help, and all translations). If you were using scenarios, they are now called Presets and work exactly the same way — no data migration needed.
+- **Preset bar replaces the "Apply Preset" modal** — Presets now appear as inline pill tags directly below the search and tag filters in Global Workspace and Project Workspace. Click a pill to instantly activate or deactivate all its skills for the current agent scope. Active presets show ✓; partially installed ones show an installed/total count. No more modal dialog.
+- **Global Workspace redesigned** — Each agent now has its own dedicated page accessible from the sidebar. Use the pinned **All Agents** entry to manage skills across every installed agent at once. Tag filters, multi-select, and batch remove are all available per-agent.
+- **Sidebar improvements** — The Presets and Project Workspaces sections can be collapsed. Agents in the Global Workspace section support drag-to-reorder.
+- **Agent icons added** — Built-in agents now show their own icons across Settings, Global Workspace, project dialogs, and agent toggles, making multi-agent lists easier to scan.
+- **More Preset icons** — Presets now offer a broader icon picker, including options for agents, CLI work, data, analytics, research, security, automation, infrastructure, and experiments.
+
+## [1.17.0] - 2026-05-07
+
+### Added
+- Agent-friendly CLI (`skills-manager-cli`) to operate on the skills repo without opening the desktop app — list, inspect, and export skills; preview and apply scenarios; run git backup commands. Supports `--json` for scripting and `--skills-root` to point at any cloned skills checkout. Install with `npm run cli:install`.
+
+### Fixed
+- Git Backup: cloning a remote skills repository on Windows no longer fails — the repo lock has been moved outside the skills directory so the clone target can be empty when needed.
+- CLI: `--skills-root` no longer writes `skills-manager.db` and other manager state into the parent directory of the cloned skills repo. Per-checkout state now lives under `~/.skills-manager/external/`, namespaced by the canonical path of the skills root.
+
 ## [1.16.1] - 2026-05-01
 
 ### Changed
