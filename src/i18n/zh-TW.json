@@ -20,7 +20,7 @@
     "items": {
       "workflows": {
         "title": "推薦工作流程",
-        "description": "單一 Agent 用戶：安裝 Skills → 開啟全域工作區 → 點擊 Preset 標籤啟用。多專案用戶：開啟專案工作區，點擊 Preset 標籤為該專案的 Agent 啟用 Skills。多機用戶：在設定頁開啟 Git 備份，把中央倉庫在多台裝置間同步。"
+        "description": "單一 Agent 用戶：安裝 Skills → 開啟全域工作區 → 點擊 Preset 標籤啟用，或點 + 新增 Skills 從技能庫挑選並即時切換目標 Agent。多專案用戶：開啟專案工作區，同樣可用 Preset 標籤或 + 新增 Skills 彈窗為該專案的 Agent 設定 Skills。多機用戶：在設定頁開啟 Git 備份，把中央倉庫在多台裝置間同步。"
       },
       "presets": {
         "title": "Preset",
@@ -31,16 +31,16 @@
         "description": "支援從本機資料夾、Git 倉庫、壓縮檔或市集匯入。支援批次匯入資料夾中的多個 Skill。"
       },
       "sync": {
-        "title": "我的 Skills",
-        "description": "瀏覽所有已安裝的 Skills，支援批次標籤編輯和依 Agent 同步開關。點擊 Skill 卡片上的 Agent 圖示即可一鍵為該 Agent 安裝或移除這個 Skill；點擊卡片本身可查看文件、版本歷史和 Agent 同步詳情。"
+        "title": "技能庫",
+        "description": "瀏覽所有已安裝的 Skills，支援批次標籤編輯和依 Agent 同步開關。可依來源或標籤篩選，新增的「未標籤」篩選項可快速找出漏打標籤的 Skills。點擊卡片上的 Agent 圖示即可一鍵為該 Agent 安裝或移除這個 Skill；卡片上恆顯示的刪除按鈕可從中央庫整體移除該 Skill。點擊卡片本身可查看文件、版本歷史和 Agent 同步詳情。"
       },
       "global": {
         "title": "全域工作區",
-        "description": "每個 Agent 都有自己的頁面，列出其全域目錄裡的所有 Skills（包括不是透過 Skills Manager 安裝的），與 Agent 實際看到的內容保持一致。可依 Agent 新增或移除 Skills，或透過「全部 Agents」總覽跨所有已安裝 Agent 統一管理。"
+        "description": "每個 Agent 都有自己的頁面，列出其全域目錄裡的所有 Skills（包括不是透過 Skills Manager 安裝的），與 Agent 實際看到的內容保持一致。點 + 新增 Skills 即可從中央庫挑選，並透過內嵌的 Agent 標籤選擇目標；也可透過「全部 Agents」總覽跨所有已安裝 Agent 統一管理。只存在於某個 Agent 目錄的 Skills 可直接在卡片上刪除。"
       },
       "projects": {
         "title": "專案工作區",
-        "description": "關聯專案後，可以檢視專案內各 Agent 的本地 Skills 目錄、對照中央倉庫，並依需求雙向匯入或匯出。使用 Preset 標籤啟用技能組，或單獨新增 Skills。"
+        "description": "關聯專案後，可以檢視專案內各 Agent 的本地 Skills 目錄、對照中央倉庫，並依需求雙向匯入或匯出。使用 Preset 標籤啟用技能組，或點 + 新增 Skills 透過多 Agent 目標選擇器從技能庫挑選。"
       },
       "backup": {
         "title": "Git 備份",
@@ -48,7 +48,7 @@
       },
       "settings": {
         "title": "設定",
-        "description": "管理 Agent 路徑與開關、自訂 Agent、拖曳調整 Agent 在全應用中的顯示順序、同步模式、主題字級、語言、網路代理、Git 遠端、AI 搜尋 Key，以及應用更新。"
+        "description": "管理 Agent 路徑與開關、自訂 Agent、拖曳調整 Agent 在全應用中的顯示順序、同步模式、主題字級、語言、網路代理、Git 遠端、AI 搜尋 Key，以及應用更新。可用「匯出日誌」把最近日誌與安裝/移除/更新/同步活動打包成壓縮檔，方便提交 Issue。"
       }
     }
   },

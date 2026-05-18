@@ -20,7 +20,7 @@
     "items": {
       "workflows": {
         "title": "推荐工作流",
-        "description": "单 Agent 用户：安装 Skills → 打开全局工作区 → 点击 Preset 标签激活。多项目用户：打开项目工作区，点击 Preset 标签为该项目的 Agent 激活 Skills。多机用户：在设置页开启 Git 备份，把中央仓库在多台设备间同步。"
+        "description": "单 Agent 用户：安装 Skills → 打开全局工作区 → 点击 Preset 标签激活，或点 + 添加 Skills 从技能库挑选并即时切换目标 Agent。多项目用户：打开项目工作区，同样可用 Preset 标签或 + 添加 Skills 弹层为该项目的 Agent 配置 Skills。多机用户：在设置页开启 Git 备份，把中央仓库在多台设备间同步。"
       },
       "presets": {
         "title": "Preset",
@@ -31,16 +31,16 @@
         "description": "从本地目录、Git 仓库、压缩包或市场导入。支持批量导入文件夹中的多个 Skill。"
       },
       "sync": {
-        "title": "我的 Skills",
-        "description": "浏览所有已安装 Skills，支持批量标签编辑和按 Agent 同步开关。点击 Skill 卡片上的 Agent 图标即可一键为该 Agent 安装或移除这个 Skill；点击卡片本身可查看文档、版本历史和 Agent 同步详情。"
+        "title": "技能库",
+        "description": "浏览所有已安装 Skills，支持批量标签编辑和按 Agent 同步开关。可按来源或标签过滤，新增的「未标签」过滤项可快速定位漏打标签的 Skills。点击卡片上的 Agent 图标可一键为该 Agent 安装或移除该 Skill；卡片上始终显示的删除按钮可从中央库整体删除该 Skill。点击卡片本身查看文档、版本历史和 Agent 同步详情。"
       },
       "global": {
         "title": "全局工作区",
-        "description": "每个 Agent 都有自己的页面，列出其全局目录里的所有 Skills（包括不是通过 Skills Manager 安装的），与 Agent 实际看到的内容保持一致。可按 Agent 添加或移除 Skills，或通过「全部 Agents」总览跨所有已安装 Agent 统一管理。"
+        "description": "每个 Agent 都有自己的页面，列出其全局目录里的所有 Skills（包括不是通过 Skills Manager 安装的），与 Agent 实际看到的内容保持一致。点击 + 添加 Skills 从中央库挑选，并通过内嵌的 Agent 标签选择目标；也可通过「全部 Agents」总览跨所有已安装 Agent 统一管理。仅存在于某个 Agent 目录的 Skills 可直接在卡片上删除。"
       },
       "projects": {
         "title": "项目工作区",
-        "description": "关联项目后查看各 Agent 的本地 Skills 目录，对照中央仓库双向导入导出。使用 Preset 标签激活技能组，或单独添加 Skills。"
+        "description": "关联项目后查看各 Agent 的本地 Skills 目录，对照中央仓库双向导入导出。使用 Preset 标签激活技能组，或点 + 添加 Skills 通过多 Agent 目标选择器从技能库挑选。"
       },
       "backup": {
         "title": "Git 备份",
@@ -48,7 +48,7 @@
       },
       "settings": {
         "title": "设置",
-        "description": "管理 Agent 路径与开关、自定义 Agent、拖拽调整 Agent 在全应用中的显示顺序、同步模式、主题字号、语言、网络代理、Git 远程、AI 搜索 Key，以及应用更新。"
+        "description": "管理 Agent 路径与开关、自定义 Agent、拖拽调整 Agent 在全应用中的显示顺序、同步模式、主题字号、语言、网络代理、Git 远程、AI 搜索 Key，以及应用更新。可用「导出日志」把最近日志与安装/移除/更新/同步活动打包成压缩文件，方便提交 Issue。"
       }
     }
   },
