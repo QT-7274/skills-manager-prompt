@@ -1873,6 +1873,9 @@ pub fn resync_copy_targets(store: &SkillStore, skill_id: &str) -> Result<(), App
             synced_at: Some(chrono::Utc::now().timestamp_millis()),
             status: "ok".to_string(),
             last_error: None,
+            // Refresh the hash so the startup freshness check (#153)
+            // sees this resync as up-to-date instead of stale.
+            source_hash: skill.content_hash.clone(),
             ..target
         };
         store.insert_target(&updated_target).map_err(AppError::db)?;
@@ -2116,6 +2119,7 @@ mod tests {
                 status: "ok".to_string(),
                 synced_at: Some(1),
                 last_error: None,
+                source_hash: None,
             })
             .unwrap();
 

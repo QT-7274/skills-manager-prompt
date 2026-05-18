@@ -48,6 +48,11 @@ pub struct SkillTargetRecord {
     pub status: String,
     pub synced_at: Option<i64>,
     pub last_error: Option<String>,
+    /// SHA-256 of the central skill source at the time of the last
+    /// successful sync. Compared against the current `skills.content_hash`
+    /// to skip redundant Copy-mode resyncs (issue #153). `None` for rows
+    /// written before this column existed, or when the source had no hash.
+    pub source_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -419,8 +424,8 @@ impl SkillStore {
     pub fn insert_target(&self, target: &SkillTargetRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 target.id,
                 target.skill_id,
@@ -430,6 +435,7 @@ impl SkillStore {
                 target.status,
                 target.synced_at,
                 target.last_error,
+                target.source_hash,
             ],
         )?;
         Ok(())
@@ -438,7 +444,7 @@ impl SkillStore {
     pub fn get_targets_for_skill(&self, skill_id: &str) -> Result<Vec<SkillTargetRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error FROM skill_targets WHERE skill_id = ?1",
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash FROM skill_targets WHERE skill_id = ?1",
         )?;
         let rows = stmt.query_map(params![skill_id], |row| {
             Ok(SkillTargetRecord {
@@ -450,6 +456,7 @@ impl SkillStore {
                 status: row.get(5)?,
                 synced_at: row.get(6)?,
                 last_error: row.get(7)?,
+                source_hash: row.get(8)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -458,7 +465,7 @@ impl SkillStore {
     pub fn get_all_targets(&self) -> Result<Vec<SkillTargetRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error FROM skill_targets",
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash FROM skill_targets",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(SkillTargetRecord {
@@ -470,6 +477,7 @@ impl SkillStore {
                 status: row.get(5)?,
                 synced_at: row.get(6)?,
                 last_error: row.get(7)?,
+                source_hash: row.get(8)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())

@@ -18,6 +18,11 @@ pub struct ScenarioSyncTarget {
     pub source: PathBuf,
     pub target: PathBuf,
     pub mode: sync_engine::SyncMode,
+    /// Current content hash of the central skill source, copied from
+    /// `SkillRecord.content_hash`. Compared against the previously
+    /// synced `SkillTargetRecord.source_hash` to skip redundant
+    /// Copy-mode resyncs at startup (issue #153).
+    pub source_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,6 +93,7 @@ pub fn collect_scenario_sync_targets(
                 source: source.clone(),
                 target,
                 mode,
+                source_hash: skill.content_hash.clone(),
             });
         }
     }
@@ -150,7 +156,13 @@ pub fn sync_desired_targets(
                 }
             } else if existing.mode == desired.mode.as_str()
                 && existing.status == "ok"
-                && sync_engine::is_target_current(&desired.source, &desired.target, desired.mode)
+                && sync_engine::is_target_current(
+                    &desired.source,
+                    &desired.target,
+                    desired.mode,
+                    existing.source_hash.as_deref(),
+                    desired.source_hash.as_deref(),
+                )
             {
                 skipped_count += 1;
                 continue;
@@ -169,6 +181,10 @@ pub fn sync_desired_targets(
                     status: "ok".to_string(),
                     synced_at: Some(now),
                     last_error: None,
+                    // Record the hash that was just synced so the next
+                    // run of this loop can short-circuit when the central
+                    // skill content has not changed (issue #153).
+                    source_hash: desired.source_hash.clone(),
                 };
                 if let Err(e) = store.insert_target(&target_record) {
                     log::warn!(
@@ -335,6 +351,7 @@ pub fn sync_skill_to_active_scenario(
                             status: "ok".to_string(),
                             synced_at: Some(now),
                             last_error: None,
+                            source_hash: skill.content_hash.clone(),
                         };
                         if let Err(e) = store.insert_target(&target_record) {
                             log::warn!("Failed to insert sync target for skill {skill_id}: {e}");
@@ -503,6 +520,7 @@ pub fn sync_single_skill_to_tool(
         status: "ok".to_string(),
         synced_at: Some(now),
         last_error: None,
+        source_hash: skill.content_hash.clone(),
     };
 
     store.insert_target(&target_record).map_err(AppError::db)?;

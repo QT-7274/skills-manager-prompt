@@ -58,7 +58,10 @@ pub fn target_dir_name(central_path: &Path, skill_name: &str) -> String {
 }
 
 pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMode> {
-    if is_target_current(source, target, mode) {
+    // Internal self-check uses no hash context, so Copy mode always
+    // proceeds — the caller (e.g. `sync_desired_targets`) is the place
+    // that knows about freshness and can short-circuit.
+    if is_target_current(source, target, mode, None, None) {
         return Ok(mode);
     }
 
@@ -111,12 +114,27 @@ pub fn sync_skill(source: &Path, target: &Path, mode: SyncMode) -> Result<SyncMo
     }
 }
 
-pub fn is_target_current(source: &Path, target: &Path, mode: SyncMode) -> bool {
+/// Decide whether the existing target is already in the desired state.
+///
+/// - **Symlink mode**: the target must be a symlink pointing at `source`.
+/// - **Copy mode**: the previously synced source hash must equal the
+///   current source hash (both must be `Some`). Callers without hash
+///   context should pass `None`, which preserves the historical
+///   "always recopy" behavior. See `SkillTargetRecord.source_hash` and
+///   issue #153 for why this short-circuit exists.
+pub fn is_target_current(
+    source: &Path,
+    target: &Path,
+    mode: SyncMode,
+    last_synced_source_hash: Option<&str>,
+    current_source_hash: Option<&str>,
+) -> bool {
     match mode {
         SyncMode::Symlink => symlink_points_to(target, source),
-        // Copy mode intentionally refreshes the target because there is no cheap
-        // metadata-backed freshness check for arbitrary skill directory contents.
-        SyncMode::Copy => false,
+        SyncMode::Copy => match (last_synced_source_hash, current_source_hash) {
+            (Some(stored), Some(current)) => stored == current,
+            _ => false,
+        },
     }
 }
 
@@ -485,5 +503,57 @@ mod tests {
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("does_not_exist");
         assert!(remove_target(&path).is_ok());
+    }
+
+    // ── is_target_current copy-mode freshness (issue #153) ──
+
+    #[test]
+    fn is_target_current_copy_skips_when_hashes_match() {
+        let src = Path::new("/whatever/source");
+        let tgt = Path::new("/whatever/target");
+        assert!(is_target_current(
+            src,
+            tgt,
+            SyncMode::Copy,
+            Some("hash-abc"),
+            Some("hash-abc"),
+        ));
+    }
+
+    #[test]
+    fn is_target_current_copy_resyncs_when_hashes_differ() {
+        let src = Path::new("/whatever/source");
+        let tgt = Path::new("/whatever/target");
+        assert!(!is_target_current(
+            src,
+            tgt,
+            SyncMode::Copy,
+            Some("hash-old"),
+            Some("hash-new"),
+        ));
+    }
+
+    #[test]
+    fn is_target_current_copy_resyncs_when_either_hash_missing() {
+        let src = Path::new("/whatever/source");
+        let tgt = Path::new("/whatever/target");
+        // No previously recorded hash → must resync (e.g. row predates v6).
+        assert!(!is_target_current(
+            src,
+            tgt,
+            SyncMode::Copy,
+            None,
+            Some("hash-abc"),
+        ));
+        // Source has no current hash → must resync (defensive).
+        assert!(!is_target_current(
+            src,
+            tgt,
+            SyncMode::Copy,
+            Some("hash-abc"),
+            None,
+        ));
+        // Both missing → must resync.
+        assert!(!is_target_current(src, tgt, SyncMode::Copy, None, None));
     }
 }
