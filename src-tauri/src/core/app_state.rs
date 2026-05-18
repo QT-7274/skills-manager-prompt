@@ -10,7 +10,7 @@ use super::{central_repo, scenario_service, skill_store::SkillStore, sync_metada
 /// `tauri_plugin_log` is registered — anything logged from inside this
 /// function would otherwise be dropped because the logger isn't installed
 /// until later in `tauri::Builder::setup`. See issue #153.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct StartupTimings {
     pub ensure_central_repo_ms: u128,
     pub open_store_ms: u128,
@@ -21,9 +21,30 @@ pub struct StartupTimings {
     pub restore_sync_included_changed: bool,
     pub write_all_from_db_ms: Option<u128>,
     pub apply_scenario_ms: u128,
-    /// "default_startup" (Tauri app) or "cli" (CLI bin)
+    /// "default_startup" (Tauri app) or "cli" (CLI bin). Defaults to
+    /// `"unknown"` so a struct that escapes `initialize_store_inner`
+    /// without being fully populated still produces an obvious value in
+    /// the log instead of an empty string.
     pub apply_scenario_kind: &'static str,
     pub total_ms: u128,
+}
+
+impl Default for StartupTimings {
+    fn default() -> Self {
+        Self {
+            ensure_central_repo_ms: 0,
+            open_store_ms: 0,
+            migrate_legacy_tool_keys_ms: 0,
+            skill_count: 0,
+            reindex_from_metadata_ms: None,
+            restore_sync_included_ms: 0,
+            restore_sync_included_changed: false,
+            write_all_from_db_ms: None,
+            apply_scenario_ms: 0,
+            apply_scenario_kind: "unknown",
+            total_ms: 0,
+        }
+    }
 }
 
 pub fn initialize_store() -> Result<(Arc<SkillStore>, StartupTimings)> {
