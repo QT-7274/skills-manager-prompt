@@ -4,7 +4,6 @@ import {
   LayoutGrid,
   List,
   CheckCircle2,
-  Circle,
   Github,
   HardDrive,
   Globe,
@@ -1496,7 +1495,6 @@ export function MySkills() {
             )}
           >
           {filtered.map((skill) => {
-            const isSynced = skill.targets.length > 0;
             const enabledInPreset = viewedPreset
               ? skill.preset_ids.includes(viewedPreset.id)
               : false;
@@ -1558,14 +1556,10 @@ export function MySkills() {
                   )}
 
                   <div className="flex items-center gap-2.5 px-3.5 pr-20 pt-3 pb-1.5">
-                    {isMultiSelect ? (
+                    {isMultiSelect && (
                       selectedIds.has(skill.id)
                         ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
                         : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                    ) : isSynced ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                    ) : (
-                      <Circle className="h-3.5 w-3.5 shrink-0 text-faint" />
                     )}
                     <h3
                       className="flex-1 truncate text-[14px] font-semibold text-primary group-hover:text-accent-light"
@@ -1745,14 +1739,10 @@ export function MySkills() {
                   </div>
                 )}
                 {dragHandle}
-                {isMultiSelect ? (
+                {isMultiSelect && (
                   selectedIds.has(skill.id)
                     ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
                     : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                ) : isSynced ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                ) : (
-                  <Circle className="h-3.5 w-3.5 shrink-0 text-faint" />
                 )}
 
                 <h3
