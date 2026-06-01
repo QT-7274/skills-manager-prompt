@@ -37,5 +37,7 @@ docs
 reference
 CLAUDE.md
 
+.loop-log
+
 # TUI crate build artifacts
 crates/sm-tui/target/

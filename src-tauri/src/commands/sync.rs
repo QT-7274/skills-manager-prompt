@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::core::{
     error::AppError,
@@ -24,6 +24,14 @@ fn disabled_tools(store: &SkillStore) -> Vec<String> {
     tool_service::get_disabled_tools(store)
 }
 
+/// Sync commands fire one call per `(skill, agent)` pair when PresetBar
+/// applies a preset from the in-app workspace view. Route through the
+/// coalescing refresh so a burst rebuilds the tray at most once per window
+/// instead of once per row.
+fn schedule_tray_refresh(app: &AppHandle) {
+    crate::schedule_tray_refresh(app);
+}
+
 fn sync_skill_to_tool_internal(
     store: &SkillStore,
     skill_id: &str,
@@ -34,94 +42,137 @@ fn sync_skill_to_tool_internal(
 
 #[tauri::command]
 pub async fn sync_skill_to_tool(
+    app: AppHandle,
     skill_id: String,
     tool: String,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        sync_skill_to_tool_internal(&store, &skill_id, &tool)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let outcome = (|| -> Result<(), AppError> {
+            sync_skill_to_tool_internal(&store, &skill_id, &tool)?;
 
-        if let Ok(Some(active_id)) = store.get_active_scenario_id() {
-            let skill_ids = store
-                .get_skill_ids_for_scenario(&active_id)
-                .map_err(AppError::db)?;
-            if skill_ids.contains(&skill_id) {
-                let adapter_keys: Vec<String> = tool_adapters::enabled_installed_adapters(&store)
-                    .iter()
-                    .map(|a| a.key.clone())
-                    .collect();
-                store
-                    .ensure_scenario_skill_tool_defaults(&active_id, &skill_id, &adapter_keys)
+            if let Ok(Some(active_id)) = store.get_active_scenario_id() {
+                let skill_ids = store
+                    .get_skill_ids_for_scenario(&active_id)
                     .map_err(AppError::db)?;
-                store
-                    .set_scenario_skill_tool_enabled(&active_id, &skill_id, &tool, true)
-                    .map_err(AppError::db)?;
+                if skill_ids.contains(&skill_id) {
+                    let adapter_keys: Vec<String> =
+                        tool_adapters::enabled_installed_adapters(&store)
+                            .iter()
+                            .map(|a| a.key.clone())
+                            .collect();
+                    store
+                        .ensure_scenario_skill_tool_defaults(&active_id, &skill_id, &adapter_keys)
+                        .map_err(AppError::db)?;
+                    store
+                        .set_scenario_skill_tool_enabled(&active_id, &skill_id, &tool, true)
+                        .map_err(AppError::db)?;
+                }
             }
-        }
 
-        Ok(())
+            Ok(())
+        })();
+        log_sync_outcome(&store, "enable", &skill_id, &tool, outcome.as_ref());
+        outcome
     })
-    .await?
+    .await?;
+    if result.is_ok() {
+        schedule_tray_refresh(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn unsync_skill_from_tool(
+    app: AppHandle,
     skill_id: String,
     tool: String,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let targets = store
-            .get_targets_for_skill(&skill_id)
-            .map_err(AppError::db)?;
-
-        if let Some(target) = targets.iter().find(|t| t.tool == tool) {
-            let target_path = PathBuf::from(&target.target_path);
-            sync_engine::remove_target(&target_path).ok();
-        }
-
-        store
-            .delete_target(&skill_id, &tool)
-            .map_err(AppError::db)?;
-
-        if let Ok(Some(active_id)) = store.get_active_scenario_id() {
-            let skill_ids = store
-                .get_skill_ids_for_scenario(&active_id)
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let outcome = (|| -> Result<(), AppError> {
+            let targets = store
+                .get_targets_for_skill(&skill_id)
                 .map_err(AppError::db)?;
-            if skill_ids.contains(&skill_id) {
-                let adapter_keys: Vec<String> = tool_adapters::enabled_installed_adapters(&store)
-                    .iter()
-                    .map(|a| a.key.clone())
-                    .collect();
-                store
-                    .ensure_scenario_skill_tool_defaults(&active_id, &skill_id, &adapter_keys)
-                    .map_err(AppError::db)?;
-                store
-                    .set_scenario_skill_tool_enabled(&active_id, &skill_id, &tool, false)
-                    .map_err(AppError::db)?;
-            }
-        }
 
-        Ok(())
+            if let Some(target) = targets.iter().find(|t| t.tool == tool) {
+                let target_path = PathBuf::from(&target.target_path);
+                sync_engine::remove_target(&target_path).ok();
+            }
+
+            store
+                .delete_target(&skill_id, &tool)
+                .map_err(AppError::db)?;
+
+            if let Ok(Some(active_id)) = store.get_active_scenario_id() {
+                let skill_ids = store
+                    .get_skill_ids_for_scenario(&active_id)
+                    .map_err(AppError::db)?;
+                if skill_ids.contains(&skill_id) {
+                    let adapter_keys: Vec<String> =
+                        tool_adapters::enabled_installed_adapters(&store)
+                            .iter()
+                            .map(|a| a.key.clone())
+                            .collect();
+                    store
+                        .ensure_scenario_skill_tool_defaults(&active_id, &skill_id, &adapter_keys)
+                        .map_err(AppError::db)?;
+                    store
+                        .set_scenario_skill_tool_enabled(&active_id, &skill_id, &tool, false)
+                        .map_err(AppError::db)?;
+                }
+            }
+
+            Ok(())
+        })();
+        log_sync_outcome(&store, "disable", &skill_id, &tool, outcome.as_ref());
+        outcome
     })
-    .await?
+    .await?;
+    if result.is_ok() {
+        schedule_tray_refresh(&app);
+    }
+    result
+}
+
+fn log_sync_outcome(
+    store: &SkillStore,
+    action: &str,
+    skill_id: &str,
+    tool: &str,
+    outcome: Result<&(), &AppError>,
+) {
+    let name = store
+        .get_skill_by_id(skill_id)
+        .ok()
+        .flatten()
+        .map(|s| s.name)
+        .unwrap_or_default();
+    let mut draft = crate::core::audit_log::AuditDraft::new(action)
+        .skill(skill_id.to_string(), name)
+        .tool(tool.to_string());
+    draft = match outcome {
+        Ok(_) => draft.ok(),
+        Err(e) => draft.fail(e.to_string()),
+    };
+    store.log_audit(draft);
 }
 
 #[tauri::command]
 pub async fn get_skill_tool_toggles(
     skill_id: String,
-    scenario_id: String,
+    preset_id: String,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<Vec<SkillToolToggleDto>, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let skill_ids = store
-            .get_skill_ids_for_scenario(&scenario_id)
+            .get_skill_ids_for_scenario(&preset_id)
             .map_err(AppError::db)?;
         if !skill_ids.contains(&skill_id) {
-            return Err(AppError::not_found("Skill is not enabled in this scenario"));
+            return Err(AppError::not_found("Skill is not enabled in this preset"));
         }
 
         let disabled = disabled_tools(&store);
@@ -132,11 +183,11 @@ pub async fn get_skill_tool_toggles(
             .map(|adapter| adapter.key.clone())
             .collect();
         store
-            .ensure_scenario_skill_tool_defaults(&scenario_id, &skill_id, &default_enabled_keys)
+            .ensure_scenario_skill_tool_defaults(&preset_id, &skill_id, &default_enabled_keys)
             .map_err(AppError::db)?;
 
         let toggles = store
-            .get_scenario_skill_tool_toggles(&scenario_id, &skill_id)
+            .get_scenario_skill_tool_toggles(&preset_id, &skill_id)
             .map_err(AppError::db)?;
         let enabled_map: std::collections::HashMap<String, bool> = toggles
             .into_iter()
@@ -168,19 +219,20 @@ pub async fn get_skill_tool_toggles(
 
 #[tauri::command]
 pub async fn set_skill_tool_toggle(
+    app: AppHandle,
     skill_id: String,
-    scenario_id: String,
+    preset_id: String,
     tool: String,
     enabled: bool,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let skill_ids = store
-            .get_skill_ids_for_scenario(&scenario_id)
+            .get_skill_ids_for_scenario(&preset_id)
             .map_err(AppError::db)?;
         if !skill_ids.contains(&skill_id) {
-            return Err(AppError::not_found("Skill is not enabled in this scenario"));
+            return Err(AppError::not_found("Skill is not enabled in this preset"));
         }
 
         let adapter = tool_adapters::find_adapter_with_store(&store, &tool)
@@ -204,7 +256,7 @@ pub async fn set_skill_tool_toggle(
         }
 
         sync_metadata::with_repo_lock("set skill tool toggle", || {
-            store.set_scenario_skill_tool_enabled(&scenario_id, &skill_id, &tool, enabled)?;
+            store.set_scenario_skill_tool_enabled(&preset_id, &skill_id, &tool, enabled)?;
             sync_metadata::write_all_from_db_unlocked(&store)
         })
         .map_err(AppError::io)?;
@@ -213,7 +265,7 @@ pub async fn set_skill_tool_toggle(
             .get_active_scenario_id()
             .map_err(AppError::db)?
             .as_deref()
-            == Some(scenario_id.as_str());
+            == Some(preset_id.as_str());
         if is_active {
             if enabled {
                 sync_skill_to_tool_internal(&store, &skill_id, &tool)?;
@@ -233,7 +285,11 @@ pub async fn set_skill_tool_toggle(
 
         Ok(())
     })
-    .await?
+    .await?;
+    if result.is_ok() {
+        schedule_tray_refresh(&app);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -286,6 +342,7 @@ mod tests {
             display_name: "Test Agent".to_string(),
             skills_dir: target_base.to_string_lossy().to_string(),
             project_relative_skills_dir: None,
+            category: Default::default(),
         }];
         store
             .set_setting(

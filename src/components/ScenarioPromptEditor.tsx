@@ -249,8 +249,8 @@ export const ScenarioPromptEditor = forwardRef<
     }
     setAiGenerating(true);
     try {
-      const skills = await api.getSkillsForScenario(scenarioId);
-      const skillList = skills.map((s: { name: string; description: string | null }) => ({
+      const skills = await api.getSkillsForPreset(scenarioId);
+      const skillList = skills.map((s) => ({
         name: s.name,
         description: s.description || "",
       }));

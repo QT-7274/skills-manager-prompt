@@ -3,8 +3,6 @@ import {
   Search,
   LayoutGrid,
   List,
-  CheckCircle2,
-  Circle,
   Github,
   HardDrive,
   Globe,
@@ -23,6 +21,7 @@ import {
   FileText,
   ArrowRight,
   Sparkles,
+  CircleSlash,
 } from "lucide-react";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
@@ -41,7 +40,7 @@ import type { ScenarioPromptEditorHandle } from "../components/ScenarioPromptEdi
 import { BatchTagDialog } from "../components/BatchTagDialog";
 import { SyncDots } from "../components/SyncDots";
 import * as api from "../lib/tauri";
-import { getTagActiveColor, getTagColor } from "../lib/skillTags";
+import { getTagActiveColor, getTagColor, UNTAGGED_FILTER } from "../lib/skillTags";
 import type {
   ManagedSkill,
   ToolInfo,
@@ -132,14 +131,16 @@ function displaySnapshotLabel(tag: string) {
 export function MySkills() {
   const { t } = useTranslation();
   const {
-    viewedScenario,
+    viewedPreset,
     tools,
     managedSkills: skills,
-    refreshScenarios,
+    refreshPresets,
     refreshManagedSkills,
     detailSkillId,
     openSkillDetailById,
     closeSkillDetail,
+    projects,
+    refreshProjects,
   } = useApp();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [filterMode, setFilterMode] = useState<"all" | "enabled" | "available">("all");
@@ -184,29 +185,29 @@ export function MySkills() {
   const promptEditorRef = useRef<ScenarioPromptEditorHandle>(null);
   const [promptUsedSkillNames, setPromptUsedSkillNames] = useState<Set<string>>(new Set());
 
-  const [scenarioSkillOrder, setScenarioSkillOrder] = useState<string[]>([]);
+  const [presetSkillOrder, setPresetSkillOrder] = useState<string[]>([]);
 
-  const viewedScenarioName = viewedScenario?.name || t("mySkills.currentScenarioFallback");
+  const viewedPresetName = viewedPreset?.name || t("mySkills.currentPresetFallback");
 
   const handlePromptTemplateChange = useCallback((template: string) => {
     setPromptUsedSkillNames(extractUsedSkillNames(template));
   }, []);
 
-  // Fetch sort order whenever viewed scenario changes
+  // Fetch sort order whenever viewed preset changes.
   useEffect(() => {
     const prevId = prevActiveScenarioIdRef.current;
-    const curId = viewedScenario?.id;
+    const curId = viewedPreset?.id;
     if (prevId !== curId) {
       setIsPromptEditorMode(false);
       setPromptUsedSkillNames(new Set());
       prevActiveScenarioIdRef.current = curId;
     }
-    if (!viewedScenario) {
-      setScenarioSkillOrder([]);
+    if (!viewedPreset) {
+      setPresetSkillOrder([]);
       return;
     }
-    api.getScenarioSkillOrder(viewedScenario.id).then(setScenarioSkillOrder).catch(() => {});
-  }, [viewedScenario, skills]);
+    api.getPresetSkillOrder(viewedPreset.id).then(setPresetSkillOrder).catch(() => {});
+  }, [viewedPreset, skills]);
 
   const refreshAllTags = async () => {
     try {
@@ -258,25 +259,30 @@ export function MySkills() {
 
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
 
-      if (tagFilters.size > 0 && !skill.tags.some((t) => tagFilters.has(t))) return false;
+      if (tagFilters.size > 0) {
+        const wantUntagged = tagFilters.has(UNTAGGED_FILTER);
+        const matchUntagged = wantUntagged && skill.tags.length === 0;
+        const matchTag = skill.tags.some((t) => tagFilters.has(t));
+        if (!matchUntagged && !matchTag) return false;
+      }
 
-      if (!viewedScenario) return true;
+      if (!viewedPreset) return true;
 
-      const enabledInScenario = skill.scenario_ids.includes(viewedScenario.id);
-      if (filterMode === "enabled") return enabledInScenario;
-      if (filterMode === "available") return !enabledInScenario;
+      const enabledInPreset = skill.preset_ids.includes(viewedPreset.id);
+      if (filterMode === "enabled") return enabledInPreset;
+      if (filterMode === "available") return !enabledInPreset;
       return true;
     });
 
     // Always sort enabled skills first; within enabled group, use custom sort order
-    if (viewedScenario) {
+    if (viewedPreset) {
       result.sort((a, b) => {
-        const aEnabled = a.scenario_ids.includes(viewedScenario.id) ? 0 : 1;
-        const bEnabled = b.scenario_ids.includes(viewedScenario.id) ? 0 : 1;
+        const aEnabled = a.preset_ids.includes(viewedPreset.id) ? 0 : 1;
+        const bEnabled = b.preset_ids.includes(viewedPreset.id) ? 0 : 1;
         if (aEnabled !== bEnabled) return aEnabled - bEnabled;
-        // Within same group, use scenario sort order
-        const aOrder = scenarioSkillOrder.indexOf(a.id);
-        const bOrder = scenarioSkillOrder.indexOf(b.id);
+        // Within same group, use preset sort order
+        const aOrder = presetSkillOrder.indexOf(a.id);
+        const bOrder = presetSkillOrder.indexOf(b.id);
         if (aOrder !== -1 && bOrder !== -1) return aOrder - bOrder;
         if (aOrder !== -1) return -1;
         if (bOrder !== -1) return 1;
@@ -285,7 +291,7 @@ export function MySkills() {
     }
 
     return result;
-  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, filterMode, viewedScenario, scenarioSkillOrder]);
+  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, filterMode, viewedPreset, presetSkillOrder]);
 
   const hasUntaggedSkills = useMemo(() => skills.some((s) => s.tags.length === 0), [skills]);
 
@@ -301,7 +307,7 @@ export function MySkills() {
     items: skills,
     filtered,
     getKey: (s) => s.id,
-    isItemActive: (s) => viewedScenario ? s.scenario_ids.includes(viewedScenario.id) : true,
+    isItemActive: (s) => viewedPreset ? s.preset_ids.includes(viewedPreset.id) : true,
   });
 
   const selectedSkill = useMemo(
@@ -317,10 +323,10 @@ export function MySkills() {
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
-      if (!over || active.id === over.id || !viewedScenario) return;
+      if (!over || active.id === over.id || !viewedPreset) return;
 
       // Only reorder enabled skills (they are always at the front)
-      const enabledSkills = filtered.filter((s) => s.scenario_ids.includes(viewedScenario.id));
+      const enabledSkills = filtered.filter((s) => s.preset_ids.includes(viewedPreset.id));
       const oldIndex = enabledSkills.findIndex((s) => s.id === active.id);
       const newIndex = enabledSkills.findIndex((s) => s.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
@@ -330,19 +336,19 @@ export function MySkills() {
       reordered.splice(newIndex, 0, moved);
 
       // Optimistic update
-      setScenarioSkillOrder(reordered.map((s) => s.id));
+      setPresetSkillOrder(reordered.map((s) => s.id));
 
       try {
-        await api.reorderScenarioSkills(viewedScenario.id, reordered.map((s) => s.id));
+        await api.reorderPresetSkills(viewedPreset.id, reordered.map((s) => s.id));
       } catch {
         // Revert on failure
-        await api.getScenarioSkillOrder(viewedScenario.id).then(setScenarioSkillOrder).catch(() => {});
+        await api.getPresetSkillOrder(viewedPreset.id).then(setPresetSkillOrder).catch(() => {});
       }
     },
-    [filtered, viewedScenario]
+    [filtered, viewedPreset]
   );
 
-  const canDrag = !!viewedScenario;
+  const canDrag = !!viewedPreset;
 
   const mapGitError = (error: unknown) => {
     const kind = getErrorKind(error);
@@ -399,6 +405,18 @@ export function MySkills() {
   const refreshGitStatus = useCallback(async () => {
     try {
       await api.gitBackupFetch().catch(() => {});
+      const status = await api.gitBackupStatus();
+      setGitStatus(status);
+    } catch {
+      // not critical
+    }
+  }, []);
+
+  // Local-only status refresh: no `git fetch`, so it can fire from
+  // dependency-driven effects without driving the file-watcher → refresh
+  // → fetch feedback loop.
+  const refreshGitStatusLocal = useCallback(async () => {
+    try {
       const status = await api.gitBackupStatus();
       setGitStatus(status);
     } catch {
@@ -470,10 +488,10 @@ export function MySkills() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      refreshGitStatus();
+      refreshGitStatusLocal();
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [skills, refreshGitStatus]);
+  }, [skills, refreshGitStatusLocal]);
 
   useEffect(() => {
     if (gitVersionsOpen && gitStatus?.is_repo) {
@@ -484,16 +502,16 @@ export function MySkills() {
   useEffect(() => {
     let cancelled = false;
     const loadToggles = async () => {
-      if (!selectedSkill || !viewedScenario) {
+      if (!selectedSkill || !viewedPreset) {
         setToolToggles(null);
         return;
       }
-      if (!selectedSkill.scenario_ids.includes(viewedScenario.id)) {
+      if (!selectedSkill.preset_ids.includes(viewedPreset.id)) {
         setToolToggles(null);
         return;
       }
       try {
-        const toggles = await api.getSkillToolToggles(selectedSkill.id, viewedScenario.id);
+        const toggles = await api.getSkillToolToggles(selectedSkill.id, viewedPreset.id);
         if (!cancelled) setToolToggles(toggles);
       } catch {
         if (!cancelled) setToolToggles(null);
@@ -503,13 +521,13 @@ export function MySkills() {
     return () => {
       cancelled = true;
     };
-  }, [selectedSkill, viewedScenario]);
+  }, [selectedSkill, viewedPreset]);
 
   const handleToggleSkillTool = async (toolKey: string, enabled: boolean) => {
-    if (!selectedSkill || !viewedScenario) return;
+    if (!selectedSkill || !viewedPreset) return;
     setTogglingToolKey(toolKey);
     try {
-      await api.setSkillToolToggle(selectedSkill.id, viewedScenario.id, toolKey, enabled);
+      await api.setSkillToolToggle(selectedSkill.id, viewedPreset.id, toolKey, enabled);
       const displayName = getToolDisplayName(toolKey, tools);
       toast.success(
         enabled
@@ -518,7 +536,7 @@ export function MySkills() {
       );
       const [, toggles] = await Promise.all([
         refreshManagedSkills(),
-        api.getSkillToolToggles(selectedSkill.id, viewedScenario.id),
+        api.getSkillToolToggles(selectedSkill.id, viewedPreset.id),
       ]);
       setToolToggles(toggles);
     } catch (error: unknown) {
@@ -559,9 +577,9 @@ export function MySkills() {
     }
     refreshAfterDeleteRef.current = window.setTimeout(() => {
       refreshAfterDeleteRef.current = null;
-      void Promise.all([refreshManagedSkills(), refreshScenarios()]);
+      void Promise.all([refreshManagedSkills(), refreshPresets()]);
     }, 300);
-  }, [refreshManagedSkills, refreshScenarios]);
+  }, [refreshManagedSkills, refreshPresets]);
 
   useEffect(() => {
     return () => {
@@ -618,7 +636,7 @@ export function MySkills() {
     } finally {
       exitMultiSelect();
       setBatchDeleteConfirm(false);
-      await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+      await Promise.all([refreshManagedSkills(), refreshPresets()]);
     }
   };
 
@@ -654,20 +672,20 @@ export function MySkills() {
     await refreshAllTags();
   };
 
-  const handleBatchToggleScenario = async () => {
-    if (!viewedScenario) return;
+  const handleBatchTogglePreset = async () => {
+    if (!viewedPreset) return;
     const selectedSkillsList = skills.filter((s) => selectedIds.has(s.id));
     const enabling = anyDisabled;
     let count = 0;
     let failed = 0;
     for (const skill of selectedSkillsList) {
       try {
-        const enabledInScenario = skill.scenario_ids.includes(viewedScenario.id);
-        if (enabling && !enabledInScenario) {
-          await api.addSkillToScenario(skill.id, viewedScenario.id);
+        const enabledInPreset = skill.preset_ids.includes(viewedPreset.id);
+        if (enabling && !enabledInPreset) {
+          await api.addSkillToPreset(skill.id, viewedPreset.id);
           count++;
-        } else if (!enabling && enabledInScenario) {
-          await api.removeSkillFromScenario(skill.id, viewedScenario.id);
+        } else if (!enabling && enabledInPreset) {
+          await api.removeSkillFromPreset(skill.id, viewedPreset.id);
           count++;
         }
       } catch {
@@ -683,7 +701,7 @@ export function MySkills() {
     if (failed > 0) {
       toast.error(t("mySkills.batchToggleFailed", { count: failed }));
     }
-    await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+    await Promise.all([refreshManagedSkills(), refreshPresets()]);
   };
 
   const handleBatchRefresh = async () => {
@@ -736,17 +754,17 @@ export function MySkills() {
     }
   };
 
-  const handleToggleScenario = async (skill: ManagedSkill) => {
-    if (!viewedScenario) return;
-    const enabledInScenario = skill.scenario_ids.includes(viewedScenario.id);
-    if (enabledInScenario) {
-      await api.removeSkillFromScenario(skill.id, viewedScenario.id);
-      toast.success(`${skill.name} ${t("mySkills.disabledInScenario")}`);
+  const handleTogglePreset = async (skill: ManagedSkill) => {
+    if (!viewedPreset) return;
+    const enabledInPreset = skill.preset_ids.includes(viewedPreset.id);
+    if (enabledInPreset) {
+      await api.removeSkillFromPreset(skill.id, viewedPreset.id);
+      toast.success(`${skill.name} ${t("mySkills.disabledInPreset")}`);
     } else {
-      await api.addSkillToScenario(skill.id, viewedScenario.id);
-      toast.success(`${skill.name} ${t("mySkills.enabledInScenario")}`);
+      await api.addSkillToPreset(skill.id, viewedPreset.id);
+      toast.success(`${skill.name} ${t("mySkills.enabledInPreset")}`);
     }
-    await Promise.all([refreshManagedSkills(), refreshScenarios()]);
+    await Promise.all([refreshManagedSkills(), refreshPresets()]);
   };
 
   const handleCheckAllUpdates = async () => {
@@ -1455,7 +1473,7 @@ export function MySkills() {
           >
             <SquareCheck className="h-4 w-4" />
           </button>
-          {viewedScenario && (
+          {viewedPreset && (
             <button
               onClick={() => setIsPromptEditorMode(!isPromptEditorMode)}
               className={cn(
@@ -1488,6 +1506,24 @@ export function MySkills() {
         {allTags.length > 0 && (
           <>
             <span className="mx-0.5 h-3 w-px bg-border-subtle" />
+            {skills.some((s) => s.tags.length === 0) && (() => {
+              const isActive = tagFilters.has(UNTAGGED_FILTER);
+              return (
+                <button
+                  onClick={() => setTagFilters(toggleFilter(tagFilters, UNTAGGED_FILTER))}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
+                    isActive
+                      ? "bg-surface-active text-primary"
+                      : "border border-dashed border-border text-muted hover:text-secondary"
+                  )}
+                  title={t("mySkills.tags.untagged")}
+                >
+                  <CircleSlash className="h-3 w-3" />
+                  {t("mySkills.tags.untagged")}
+                </button>
+              );
+            })()}
             {allTags.map((tag) => {
               const isActive = tagFilters.has(tag);
               return (
@@ -1511,9 +1547,9 @@ export function MySkills() {
         <MultiSelectToolbar
           selectedCount={selectedIds.size}
           isAllSelected={isAllSelected}
-          anyDisabled={viewedScenario ? anyDisabled : false}
+          anyDisabled={viewedPreset ? anyDisabled : false}
           anyUpdatable={anyRefreshableSelected}
-          showToggle={!!viewedScenario}
+          showToggle={!!viewedPreset}
           updating={batchUpdating}
           labels={{
             hint: t("mySkills.selectHint"),
@@ -1530,7 +1566,7 @@ export function MySkills() {
           }}
           onUpdate={handleBatchRefresh}
           onDelete={() => setBatchDeleteConfirm(true)}
-          onToggle={handleBatchToggleScenario}
+          onToggle={handleBatchTogglePreset}
           onSelectAll={handleSelectAll}
           onCancel={exitMultiSelect}
           onAiTag={() => {
@@ -1622,9 +1658,8 @@ export function MySkills() {
             )}
           >
           {filtered.map((skill) => {
-            const isSynced = skill.targets.length > 0;
-            const enabledInScenario = viewedScenario
-              ? skill.scenario_ids.includes(viewedScenario.id)
+            const enabledInPreset = viewedPreset
+              ? skill.preset_ids.includes(viewedPreset.id)
               : false;
             const badge = statusBadge(skill);
             const isMissingLocalSource =
@@ -1644,7 +1679,7 @@ export function MySkills() {
                 <div
                   className={cn(
                     "app-panel group relative flex h-full cursor-pointer flex-col transition-all hover:border-border hover:bg-surface-hover",
-                    enabledInScenario && "border-l-2 border-l-accent",
+                    enabledInPreset && "border-l-2 border-l-accent",
                     isMultiSelect && "cursor-pointer",
                     isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40",
                     isPromptEditorMode && promptUsedSkillNames.has(skill.name) && "opacity-50"
@@ -1686,14 +1721,10 @@ export function MySkills() {
                   )}
 
                   <div className="flex items-center gap-2.5 px-3.5 pr-20 pt-3 pb-1.5">
-                    {isMultiSelect ? (
+                    {isMultiSelect && (
                       selectedIds.has(skill.id)
                         ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
                         : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                    ) : isSynced ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                    ) : (
-                      <Circle className="h-3.5 w-3.5 shrink-0 text-faint" />
                     )}
                     <h3
                       className="flex-1 truncate text-[14px] font-semibold text-primary group-hover:text-accent-light"
@@ -1825,11 +1856,11 @@ export function MySkills() {
                         {sourceIcon(skill.source_type)}
                         {sourceTypeLabel(skill)}
                       </span>
-                      {enabledInScenario && (
+                      {enabledInPreset && (
                         <>
                           <span className="text-faint">·</span>
                           <span className="truncate text-[13px] font-medium text-amber-600 dark:text-amber-400/80">
-                            {viewedScenarioName}
+                            {viewedPresetName}
                           </span>
                         </>
                       )}
@@ -1839,7 +1870,7 @@ export function MySkills() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!enabledInScenario) handleToggleScenario(skill);
+                            if (!enabledInPreset) handleTogglePreset(skill);
                             promptEditorRef.current?.insertSkillAtCursor(skill.name);
                           }}
                           disabled={promptUsedSkillNames.has(skill.name)}
@@ -1861,16 +1892,16 @@ export function MySkills() {
                         pendingKey={togglingTarget?.skillId === skill.id ? togglingTarget.tool : null}
                       />
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleScenario(skill); }}
-                        disabled={!viewedScenario}
+                        onClick={(e) => { e.stopPropagation(); handleTogglePreset(skill); }}
+                        disabled={!viewedPreset}
                         className={cn(
                           "rounded px-2 py-1 text-[13px] font-medium transition-colors outline-none",
-                          enabledInScenario
+                          enabledInPreset
                             ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
                             : "text-muted hover:bg-surface-hover hover:text-secondary"
                         )}
                       >
-                        {enabledInScenario ? t("mySkills.enabledButton") : t("mySkills.enable")}
+                        {enabledInPreset ? t("mySkills.enabledButton") : t("mySkills.enable")}
                       </button>
                     </div>
                   </div>
@@ -1886,7 +1917,7 @@ export function MySkills() {
               <div
                 className={cn(
                   "app-panel group relative flex cursor-pointer items-center gap-3.5 rounded-xl border-transparent px-3.5 py-3 transition-all hover:border-border hover:bg-surface-hover",
-                  enabledInScenario && "border-l-2 border-l-accent",
+                  enabledInPreset && "border-l-2 border-l-accent",
                   isMultiSelect && "cursor-pointer",
                   isMultiSelect && selectedIds.has(skill.id) && "ring-1 ring-accent border-accent/40",
                   isPromptEditorMode && promptUsedSkillNames.has(skill.name) && "opacity-50"
@@ -1901,14 +1932,10 @@ export function MySkills() {
                   </div>
                 )}
                 {dragHandle}
-                {isMultiSelect ? (
+                {isMultiSelect && (
                   selectedIds.has(skill.id)
                     ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
                     : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                ) : isSynced ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                ) : (
-                  <Circle className="h-3.5 w-3.5 shrink-0 text-faint" />
                 )}
 
                 <h3
@@ -1975,9 +2002,9 @@ export function MySkills() {
                     {sourceIcon(skill.source_type)}
                     {sourceTypeLabel(skill)}
                   </span>
-                  {enabledInScenario && (
+                  {enabledInPreset && (
                     <span className="text-[13px] font-medium text-amber-600 dark:text-amber-400/80">
-                      {viewedScenarioName}
+                      {viewedPresetName}
                     </span>
                   )}
                 </div>
@@ -1987,7 +2014,7 @@ export function MySkills() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (!enabledInScenario) handleToggleScenario(skill);
+                        if (!enabledInPreset) handleTogglePreset(skill);
                         promptEditorRef.current?.insertSkillAtCursor(skill.name);
                       }}
                       disabled={promptUsedSkillNames.has(skill.name)}
@@ -2016,16 +2043,16 @@ export function MySkills() {
                     </>
                   )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleToggleScenario(skill); }}
-                    disabled={!viewedScenario}
+                    onClick={(e) => { e.stopPropagation(); handleTogglePreset(skill); }}
+                    disabled={!viewedPreset}
                     className={cn(
                       "rounded px-2 py-0.5 text-[13px] font-medium transition-colors outline-none",
-                      enabledInScenario
+                      enabledInPreset
                         ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
                         : "text-muted hover:bg-surface-hover hover:text-secondary"
                     )}
                   >
-                    {enabledInScenario ? t("mySkills.enabledButton") : t("mySkills.enable")}
+                    {enabledInPreset ? t("mySkills.enabledButton") : t("mySkills.enable")}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleCheckUpdate(skill); }}
@@ -2059,12 +2086,12 @@ export function MySkills() {
         </div>
           </SortableContext>
           </div>
-          {isPromptEditorMode && viewedScenario && (
+          {isPromptEditorMode && viewedPreset && (
             <div className="flex-1 min-w-0 max-h-[calc(100vh-220px)] overflow-y-auto scrollbar-hide pb-8">
               <ScenarioPromptEditor
                 ref={promptEditorRef}
-                scenarioId={viewedScenario.id}
-                scenarioName={viewedScenario.name}
+                scenarioId={viewedPreset.id}
+                scenarioName={viewedPreset.name}
                 onExit={() => setIsPromptEditorMode(false)}
                 onTemplateChange={handlePromptTemplateChange}
               />
@@ -2082,6 +2109,8 @@ export function MySkills() {
         toolToggles={toolToggles}
         togglingTool={togglingToolKey}
         onToggleTool={handleToggleSkillTool}
+        projects={projects}
+        onProjectsChanged={refreshProjects}
       />
 
       <ConfirmDialog

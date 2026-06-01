@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use super::{
     error::AppError,
     skill_store::SkillStore,
-    tool_adapters::{self, CustomToolDef},
+    tool_adapters::{self, CustomToolDef, ToolCategory},
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -17,6 +17,7 @@ pub struct ToolInfo {
     pub is_custom: bool,
     pub has_path_override: bool,
     pub project_relative_skills_dir: Option<String>,
+    pub category: ToolCategory,
 }
 
 pub fn get_disabled_tools(store: &SkillStore) -> Vec<String> {
@@ -116,10 +117,7 @@ pub fn get_custom_tools(store: &SkillStore) -> Vec<CustomToolDef> {
     tool_adapters::custom_tools(store)
 }
 
-pub fn set_custom_tools(
-    store: &SkillStore,
-    custom_tools: &[CustomToolDef],
-) -> Result<(), AppError> {
+pub fn set_custom_tools(store: &SkillStore, custom_tools: &[CustomToolDef]) -> Result<(), AppError> {
     let json = serde_json::to_string(custom_tools)
         .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
     store
@@ -197,6 +195,7 @@ pub fn list_tool_info(store: &SkillStore) -> Vec<ToolInfo> {
                     Some(project_dir.to_string())
                 }
             },
+            category: adapter.category,
         })
         .collect();
 
@@ -204,8 +203,7 @@ pub fn list_tool_info(store: &SkillStore) -> Vec<ToolInfo> {
     let all_keys: Vec<String> = infos.iter().map(|i| i.key.clone()).collect();
     let ordered_keys = merge_order(&saved, &all_keys);
 
-    let mut by_key: HashMap<String, ToolInfo> =
-        infos.into_iter().map(|i| (i.key.clone(), i)).collect();
+    let mut by_key: HashMap<String, ToolInfo> = infos.into_iter().map(|i| (i.key.clone(), i)).collect();
     ordered_keys
         .into_iter()
         .filter_map(|k| by_key.remove(&k))
@@ -289,11 +287,7 @@ pub fn migrate_legacy_tool_keys(store: &SkillStore) -> Result<(), AppError> {
         set_custom_tools(store, &normalized_customs)?;
     }
 
-    if changed
-        || store
-            .has_tool_key_references(OLD_KEY)
-            .map_err(AppError::db)?
-    {
+    if changed || store.has_tool_key_references(OLD_KEY).map_err(AppError::db)? {
         store
             .remap_tool_key_references(OLD_KEY, NEW_KEY)
             .map_err(AppError::db)?;

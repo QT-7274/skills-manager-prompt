@@ -1,0 +1,9 @@
+{
+  "machineId": "4e7a9259c694dd29515e5ba2a800f371aa9cd79d82de6f97d29789564b5e902b",
+  "hostname": "DROGBAQU-MC2",
+  "platform": "darwin",
+  "arch": "arm64",
+  "nodeVersion": "v22.22.1",
+  "vscodeVersion": "1.120.0",
+  "maultVersion": "0.15.5"
+}

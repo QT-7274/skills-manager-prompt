@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// Current schema version. Bump this when adding a new migration.
-const LATEST_VERSION: u32 = 6;
+const LATEST_VERSION: u32 = 8;
 
 /// Run all pending migrations on the database.
 ///
@@ -53,6 +53,8 @@ fn migrate_step(conn: &Connection, from_version: u32) -> Result<()> {
         3 => migrate_v3_to_v4(conn),
         4 => migrate_v4_to_v5(conn),
         5 => migrate_v5_to_v6(conn),
+        6 => migrate_v6_to_v7(conn),
+        7 => migrate_v7_to_v8(conn),
         _ => bail!("unknown migration version: {from_version}"),
     }
 }
@@ -98,6 +100,7 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<()> {
             status TEXT DEFAULT 'ok',
             synced_at INTEGER,
             last_error TEXT,
+            source_hash TEXT,
             UNIQUE(skill_id, tool)
         );
 
@@ -218,7 +221,7 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// v4 → v5: Add scenario_recipes and recipe_skills tables.
+/// v4 → v5: Add scenario_recipes, recipe_skills, and audit_log tables.
 fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
@@ -241,12 +244,24 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
             sort_order INTEGER DEFAULT 0,
             PRIMARY KEY(recipe_id, skill_id)
         );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            skill_id TEXT,
+            skill_name TEXT,
+            tool TEXT,
+            success INTEGER NOT NULL,
+            detail TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);
         ",
     )?;
     Ok(())
 }
 
-/// v5 → v6: Expand projects into generic workspace records (linked workspaces).
+/// v5 → v6: Expand projects into generic workspace records and track sync source hashes.
 fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
@@ -273,6 +288,62 @@ fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "projects", "linked_agent_key", "TEXT")?;
     add_column_if_missing(conn, "projects", "linked_agent_name", "TEXT")?;
     add_column_if_missing(conn, "projects", "disabled_path", "TEXT")?;
+    add_column_if_missing(conn, "skill_targets", "source_hash", "TEXT")?;
+    Ok(())
+}
+
+/// v6 → v7: Preserve fork databases that already track per-skill update history.
+fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS skill_update_history (
+            id TEXT PRIMARY KEY,
+            skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+            updated_at INTEGER NOT NULL,
+            source_type TEXT NOT NULL,
+            from_revision TEXT,
+            to_revision TEXT,
+            old_document_filename TEXT,
+            new_document_filename TEXT,
+            old_document_content TEXT NOT NULL,
+            new_document_content TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+/// v7 → v8: Reconcile fork v7 databases with upstream schema additions.
+fn migrate_v7_to_v8(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS skill_targets (
+            id TEXT PRIMARY KEY,
+            skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+            tool TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            status TEXT DEFAULT 'ok',
+            synced_at INTEGER,
+            last_error TEXT,
+            source_hash TEXT,
+            UNIQUE(skill_id, tool)
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            skill_id TEXT,
+            skill_name TEXT,
+            tool TEXT,
+            success INTEGER NOT NULL,
+            detail TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);
+        ",
+    )?;
+    add_column_if_missing(conn, "skill_targets", "source_hash", "TEXT")?;
     Ok(())
 }
 
@@ -345,6 +416,8 @@ mod tests {
         assert!(tables.contains(&"scenario_skill_tools".to_string()));
         assert!(tables.contains(&"scenario_recipes".to_string()));
         assert!(tables.contains(&"recipe_skills".to_string()));
+        assert!(tables.contains(&"audit_log".to_string()));
+        assert!(tables.contains(&"skill_update_history".to_string()));
     }
 
     #[test]
@@ -458,6 +531,17 @@ mod tests {
                 added_at INTEGER,
                 PRIMARY KEY(scenario_id, skill_id)
             );
+            CREATE TABLE skill_targets (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                tool TEXT NOT NULL,
+                target_path TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                status TEXT DEFAULT 'ok',
+                synced_at INTEGER,
+                last_error TEXT,
+                UNIQUE(skill_id, tool)
+            );
             PRAGMA user_version = 1;
             ",
         )
@@ -465,6 +549,145 @@ mod tests {
 
         run_migrations(&conn).unwrap();
         assert!(has_column(&conn, "scenario_skill_tools", "enabled").unwrap());
+        assert!(has_column(&conn, "skill_targets", "source_hash").unwrap());
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, LATEST_VERSION);
+    }
+
+    #[test]
+    fn test_v6_database_upgrades_to_v7() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        conn.execute_batch(
+            "
+            CREATE TABLE skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                source_type TEXT NOT NULL,
+                source_ref TEXT,
+                source_ref_resolved TEXT,
+                source_subpath TEXT,
+                source_branch TEXT,
+                source_revision TEXT,
+                remote_revision TEXT,
+                central_path TEXT NOT NULL UNIQUE,
+                content_hash TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at INTEGER,
+                updated_at INTEGER,
+                status TEXT DEFAULT 'ok',
+                update_status TEXT DEFAULT 'unknown',
+                last_checked_at INTEGER,
+                last_check_error TEXT
+            );
+            CREATE TABLE skill_targets (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                tool TEXT NOT NULL,
+                target_path TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                status TEXT DEFAULT 'ok',
+                synced_at INTEGER,
+                last_error TEXT,
+                UNIQUE(skill_id, tool)
+            );
+            PRAGMA user_version = 6;
+            ",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='skill_update_history')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_exists);
+        assert!(has_column(&conn, "skill_targets", "source_hash").unwrap());
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, LATEST_VERSION);
+    }
+
+    #[test]
+    fn test_fork_v7_database_upgrades_to_v8() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        conn.execute_batch(
+            "
+            CREATE TABLE skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                source_type TEXT NOT NULL,
+                source_ref TEXT,
+                source_ref_resolved TEXT,
+                source_subpath TEXT,
+                source_branch TEXT,
+                source_revision TEXT,
+                remote_revision TEXT,
+                central_path TEXT NOT NULL UNIQUE,
+                content_hash TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at INTEGER,
+                updated_at INTEGER,
+                status TEXT DEFAULT 'ok',
+                update_status TEXT DEFAULT 'unknown',
+                last_checked_at INTEGER,
+                last_check_error TEXT
+            );
+            CREATE TABLE skill_targets (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                tool TEXT NOT NULL,
+                target_path TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                status TEXT DEFAULT 'ok',
+                synced_at INTEGER,
+                last_error TEXT,
+                UNIQUE(skill_id, tool)
+            );
+            CREATE TABLE skill_update_history (
+                id TEXT PRIMARY KEY,
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                updated_at INTEGER NOT NULL,
+                source_type TEXT NOT NULL,
+                from_revision TEXT,
+                to_revision TEXT,
+                old_document_filename TEXT,
+                new_document_filename TEXT,
+                old_document_content TEXT NOT NULL,
+                new_document_content TEXT NOT NULL
+            );
+            PRAGMA user_version = 7;
+            ",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        assert!(has_column(&conn, "skill_targets", "source_hash").unwrap());
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(tables.contains(&"audit_log".to_string()));
+        assert!(tables.contains(&"skill_update_history".to_string()));
 
         let version: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
