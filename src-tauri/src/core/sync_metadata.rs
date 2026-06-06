@@ -120,6 +120,12 @@ pub(crate) fn reindex_from_metadata_unlocked(store: &SkillStore) -> Result<()> {
         );
     }
     ensure_unique_path_keys(&skills)?;
+    let skills_root = central_repo::skills_dir();
+    let valid_skill_ids: HashSet<String> = skills
+        .iter()
+        .filter(|meta| skills_root.join(&meta.path).is_dir())
+        .map(|meta| meta.skill_id.clone())
+        .collect();
 
     let has_complete_scenario_snapshot = metadata_has_complete_scenario_snapshot();
     let scenarios = if has_complete_scenario_snapshot {
@@ -128,16 +134,22 @@ pub(crate) fn reindex_from_metadata_unlocked(store: &SkillStore) -> Result<()> {
         Vec::new()
     };
     let memberships = if has_complete_scenario_snapshot {
+        let scenario_ids: HashSet<String> =
+            scenarios.iter().map(|s| s.scenario_id.clone()).collect();
         read_membership_files()?
+            .into_iter()
+            .filter(|member| {
+                scenario_ids.contains(&member.scenario_id)
+                    && valid_skill_ids.contains(&member.skill_id)
+            })
+            .collect()
     } else {
         Vec::new()
     };
     let now = chrono::Utc::now().timestamp_millis();
-    let skills_root = central_repo::skills_dir();
 
-    let metadata_ids: HashSet<String> = skills.iter().map(|m| m.skill_id.clone()).collect();
     for existing in store.get_all_skills()? {
-        if !metadata_ids.contains(&existing.id) {
+        if !valid_skill_ids.contains(&existing.id) {
             store.delete_skill(&existing.id)?;
         }
     }
@@ -741,5 +753,77 @@ mod tests {
                 .unwrap(),
             vec!["tag-a".to_string(), "tag-b".to_string()]
         );
+    }
+
+    #[test]
+    fn metadata_reindex_skips_memberships_for_missing_skill_dirs() {
+        let repo = test_repo();
+        let skill_dir = write_skill_dir("existing-skill");
+        let skill = sample_skill("skill-existing", &skill_dir);
+
+        write_schema().unwrap();
+        write_skill_file(&skill, &[]).unwrap();
+        atomic_write_json(
+            &metadata_dir().join("skills").join("skill-missing.json"),
+            &SkillMetaFile {
+                schema_version: SCHEMA_VERSION,
+                skill_id: "skill-missing".to_string(),
+                path: "missing-skill".to_string(),
+                path_key: path_key("missing-skill"),
+                enabled: true,
+                tags: Vec::new(),
+                source: SourceMeta {
+                    source_type: "import".to_string(),
+                    ref_: None,
+                    subpath: None,
+                    branch: None,
+                },
+            },
+        )
+        .unwrap();
+        write_scenario_file(&ScenarioRecord {
+            id: "scenario-1".to_string(),
+            name: "Scenario".to_string(),
+            description: None,
+            icon: None,
+            sort_order: 0,
+            prompt_template: None,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+        write_membership_file(&ScenarioSkillMetaFile {
+            schema_version: SCHEMA_VERSION,
+            scenario_id: "scenario-1".to_string(),
+            skill_id: "skill-existing".to_string(),
+            sort_order: 0,
+            tools: BTreeMap::from([("codex".to_string(), true)]),
+        })
+        .unwrap();
+        write_membership_file(&ScenarioSkillMetaFile {
+            schema_version: SCHEMA_VERSION,
+            scenario_id: "scenario-1".to_string(),
+            skill_id: "skill-missing".to_string(),
+            sort_order: 1,
+            tools: BTreeMap::from([("codex".to_string(), true)]),
+        })
+        .unwrap();
+
+        reindex_from_metadata_unlocked(&repo.store).unwrap();
+
+        assert!(repo
+            .store
+            .get_skill_by_id("skill-missing")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repo.store.get_skill_ids_for_scenario("scenario-1").unwrap(),
+            vec!["skill-existing".to_string()]
+        );
+        assert!(repo
+            .store
+            .get_scenario_skill_tool_toggles("scenario-1", "skill-missing")
+            .unwrap()
+            .is_empty());
     }
 }

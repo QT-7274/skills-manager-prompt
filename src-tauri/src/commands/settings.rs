@@ -1,4 +1,5 @@
 use semver::Version;
+use std::io::{BufRead, BufReader};
 use std::process::Command;
 use std::sync::Arc;
 use tauri::{Manager, State};
@@ -290,8 +291,11 @@ pub async fn check_last_panic(app: tauri::AppHandle) -> Result<Option<PanicInfo>
             .unwrap_or(std::time::SystemTime::now());
         let datetime: chrono::DateTime<chrono::Local> = modified.into();
         let timestamp = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
-        let content = std::fs::read_to_string(&panic_path).unwrap_or_default();
-        let first_lines: Vec<&str> = content.lines().take(3).collect();
+        let file = std::fs::File::open(&panic_path).map_err(AppError::io)?;
+        let mut first_lines = Vec::new();
+        for line in BufReader::new(file).lines().take(3) {
+            first_lines.push(line.unwrap_or_default());
+        }
         let message = log_sanitize::sanitize(&first_lines.join("\n"));
         Ok(Some(PanicInfo { timestamp, message }))
     })

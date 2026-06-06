@@ -50,7 +50,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
-import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { check as checkUpdater } from "@tauri-apps/plugin-updater";
 import { open as dialogOpen, confirm as dialogConfirm } from "@tauri-apps/plugin-dialog";
 import { cn } from "../utils";
@@ -641,16 +640,10 @@ export function Settings() {
       const md = parts.join("\n");
       let copied = false;
       try {
-        await clipboardWriteText(md);
+        await navigator.clipboard.writeText(md);
         copied = true;
       } catch (err) {
         console.error("Clipboard write failed", err);
-        try {
-          await navigator.clipboard.writeText(md);
-          copied = true;
-        } catch (err2) {
-          console.error("Browser clipboard fallback also failed", err2);
-        }
       }
       try {
         await openUrl(`${GITHUB_URL}/issues/new?template=bug_report.md`);
