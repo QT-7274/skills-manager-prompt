@@ -1,20 +1,66 @@
 use crate::core::{
     central_repo, error::AppError, git_backup, git_fetcher, skill_metadata, sync_metadata,
 };
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tauri::State;
+use tokio::sync::{watch, Mutex};
 use walkdir::WalkDir;
 
 use crate::core::skill_store::SkillStore;
 
+static FETCH_IN_FLIGHT: LazyLock<Mutex<Option<FetchInFlight>>> = LazyLock::new(|| Mutex::new(None));
+
+#[derive(Clone)]
+struct FetchInFlight {
+    completion: watch::Receiver<Option<Result<(), AppError>>>,
+}
+
+async fn wait_for_fetch(
+    mut completion: watch::Receiver<Option<Result<(), AppError>>>,
+) -> Result<(), AppError> {
+    loop {
+        if let Some(result) = completion.borrow().clone() {
+            return result;
+        }
+        if completion.changed().await.is_err() {
+            return Err(AppError::internal(
+                "git fetch task ended without reporting a result",
+            ));
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn git_backup_fetch(store: State<'_, Arc<SkillStore>>) -> Result<(), AppError> {
     let _ = store;
-    let skills_dir = central_repo::skills_dir();
-    tokio::task::spawn_blocking(move || {
-        git_backup::fetch_remote(&skills_dir).map_err(AppError::git)
-    })
-    .await?
+    let completion = {
+        let mut in_flight = FETCH_IN_FLIGHT.lock().await;
+        if let Some(fetch) = in_flight.as_ref() {
+            fetch.completion.clone()
+        } else {
+            let (tx, completion) = watch::channel(None);
+            *in_flight = Some(FetchInFlight {
+                completion: completion.clone(),
+            });
+            let skills_dir = central_repo::skills_dir();
+            tokio::spawn(async move {
+                let result = match tokio::task::spawn_blocking(move || {
+                    git_backup::fetch_remote(&skills_dir).map_err(AppError::git)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(error) => Err(AppError::from(error)),
+                };
+
+                let _ = tx.send(Some(result));
+                let mut in_flight = FETCH_IN_FLIGHT.lock().await;
+                *in_flight = None;
+            });
+            completion
+        }
+    };
+    wait_for_fetch(completion).await
 }
 
 #[tauri::command]
@@ -252,4 +298,37 @@ fn reconcile_skills_index_unlocked(store: &SkillStore) -> anyhow::Result<()> {
     }
 
     sync_metadata::write_all_from_db_unlocked(store)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn wait_for_fetch_returns_shared_success_to_waiters() {
+        let (tx, rx) = watch::channel(None);
+        let first = tokio::spawn(wait_for_fetch(rx.clone()));
+        let second = tokio::spawn(wait_for_fetch(rx));
+
+        tx.send(Some(Ok(()))).unwrap();
+
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_for_fetch_returns_shared_error_to_waiters() {
+        let (tx, rx) = watch::channel(None);
+        let first = tokio::spawn(wait_for_fetch(rx.clone()));
+        let second = tokio::spawn(wait_for_fetch(rx));
+
+        tx.send(Some(Err(AppError::git("fetch failed")))).unwrap();
+
+        let first_error = first.await.unwrap().unwrap_err();
+        let second_error = second.await.unwrap().unwrap_err();
+        assert_eq!(first_error.kind, crate::core::error::ErrorKind::Git);
+        assert_eq!(first_error.message, "fetch failed");
+        assert_eq!(second_error.kind, crate::core::error::ErrorKind::Git);
+        assert_eq!(second_error.message, "fetch failed");
+    }
 }

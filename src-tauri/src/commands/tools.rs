@@ -1,18 +1,21 @@
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::State;
+use std::time::Instant;
+use tauri::{AppHandle, State};
 
 use crate::core::error::AppError;
 use crate::core::scenario_service;
 use crate::core::scenario_service::sync_scenario_skills;
 use crate::core::skill_store::SkillStore;
 use crate::core::sync_engine;
-use crate::core::tool_adapters::{self, CustomToolDef};
+use crate::core::timing::should_log_first_or_slow;
+use crate::core::tool_adapters::{self, CustomToolDef, ToolCategory};
 use crate::core::tool_service::{
-    self, get_custom_tool_paths, get_custom_tools, get_disabled_tools, get_tool_order,
+    self, ToolInfo, get_custom_tool_paths, get_custom_tools, get_disabled_tools, get_tool_order,
     normalize_project_relative_skills_dir_input, normalize_skills_dir_input, set_custom_tool_paths,
-    set_custom_tools, set_disabled_tools, set_tool_order, ToolInfo,
+    set_custom_tools, set_disabled_tools, set_tool_order,
 };
 
 #[derive(Debug, Serialize)]
@@ -25,6 +28,7 @@ pub struct ToolInfoDto {
     pub is_custom: bool,
     pub has_path_override: bool,
     pub project_relative_skills_dir: Option<String>,
+    pub category: ToolCategory,
 }
 
 /// Sync active scenario skills to a single tool.
@@ -66,13 +70,18 @@ fn reconcile_tool_sync_after_path_change(store: &SkillStore, tool_key: &str) {
     }
 }
 
+static GET_TOOL_STATUS_FIRST_CALL: AtomicBool = AtomicBool::new(true);
+
 #[tauri::command]
 pub async fn get_tool_status(
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<Vec<ToolInfoDto>, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let result: Vec<ToolInfoDto> = tool_service::list_tool_info(&store)
+        let start = Instant::now();
+        let infos = tool_service::list_tool_info(&store);
+        let count = infos.len();
+        let result: Vec<ToolInfoDto> = infos
             .into_iter()
             .map(|info: ToolInfo| ToolInfoDto {
                 key: info.key,
@@ -83,21 +92,33 @@ pub async fn get_tool_status(
                 is_custom: info.is_custom,
                 has_path_override: info.has_path_override,
                 project_relative_skills_dir: info.project_relative_skills_dir,
+                category: info.category,
             })
             .collect();
+        let elapsed_ms = start.elapsed().as_millis();
+        if should_log_first_or_slow(&GET_TOOL_STATUS_FIRST_CALL, elapsed_ms, 100) {
+            log::info!("get_tool_status: {count} tools in {elapsed_ms} ms");
+        }
         Ok(result)
     })
     .await?
 }
 
+fn refresh_tray_menu_best_effort(app: &AppHandle) {
+    if let Err(err) = crate::refresh_tray_menu(app) {
+        log::warn!("Failed to refresh tray menu after tool mutation: {err}");
+    }
+}
+
 #[tauri::command]
 pub async fn set_tool_enabled(
+    app: AppHandle,
     key: String,
     enabled: bool,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let mut disabled = get_disabled_tools(&store);
         if enabled {
             disabled.retain(|k| k != &key);
@@ -112,16 +133,21 @@ pub async fn set_tool_enabled(
             set_disabled_tools(&store, &disabled)
         }
     })
-    .await?
+    .await?;
+    if result.is_ok() {
+        refresh_tray_menu_best_effort(&app);
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn set_all_tools_enabled(
+    app: AppHandle,
     enabled: bool,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         if enabled {
             set_disabled_tools(&store, &[])?;
             // Re-sync active scenario skills to all (now-enabled) installed tools
@@ -138,7 +164,11 @@ pub async fn set_all_tools_enabled(
             set_disabled_tools(&store, &all_keys)
         }
     })
-    .await?
+    .await?;
+    if result.is_ok() {
+        refresh_tray_menu_best_effort(&app);
+    }
+    result
 }
 
 #[tauri::command]
@@ -287,6 +317,7 @@ pub async fn add_custom_tool(
             display_name,
             skills_dir,
             project_relative_skills_dir,
+            category: Default::default(),
         });
         set_custom_tools(&store, &customs)?;
         reconcile_tool_sync_after_path_change(&store, &key);
@@ -403,6 +434,7 @@ mod tests {
             display_name: "Test Agent".to_string(),
             skills_dir: target_base.to_string_lossy().to_string(),
             project_relative_skills_dir: None,
+            category: Default::default(),
         }];
         store
             .set_setting(

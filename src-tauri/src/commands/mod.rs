@@ -5,7 +5,7 @@ pub mod git_backup;
 pub mod projects;
 pub mod recipes;
 pub mod scan;
-pub mod scenarios;
+pub mod presets;
 pub mod settings;
 pub mod skills;
 pub mod sync;

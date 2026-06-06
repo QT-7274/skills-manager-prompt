@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use super::audit_log::{AuditDraft, AuditEntry, MAX_ENTRIES as AUDIT_MAX_ENTRIES};
 use super::crypto;
 
 /// Settings keys whose values are encrypted at rest with AES-256-GCM.
@@ -54,6 +55,11 @@ pub struct SkillTargetRecord {
     pub status: String,
     pub synced_at: Option<i64>,
     pub last_error: Option<String>,
+    /// SHA-256 of the central skill source at the time of the last
+    /// successful sync. Compared against the current `skills.content_hash`
+    /// to skip redundant Copy-mode resyncs (issue #153). `None` for rows
+    /// written before this column existed, or when the source had no hash.
+    pub source_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -333,6 +339,16 @@ impl SkillStore {
         Ok(())
     }
 
+    pub fn update_skill_enabled(&self, id: &str, enabled: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE skills SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+            params![enabled, now, id],
+        )?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn update_skill_after_install(
         &self,
@@ -429,8 +445,8 @@ impl SkillStore {
     pub fn insert_target(&self, target: &SkillTargetRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 target.id,
                 target.skill_id,
@@ -440,6 +456,7 @@ impl SkillStore {
                 target.status,
                 target.synced_at,
                 target.last_error,
+                target.source_hash,
             ],
         )?;
         Ok(())
@@ -448,7 +465,7 @@ impl SkillStore {
     pub fn get_targets_for_skill(&self, skill_id: &str) -> Result<Vec<SkillTargetRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error FROM skill_targets WHERE skill_id = ?1",
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash FROM skill_targets WHERE skill_id = ?1",
         )?;
         let rows = stmt.query_map(params![skill_id], |row| {
             Ok(SkillTargetRecord {
@@ -460,6 +477,7 @@ impl SkillStore {
                 status: row.get(5)?,
                 synced_at: row.get(6)?,
                 last_error: row.get(7)?,
+                source_hash: row.get(8)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -468,7 +486,7 @@ impl SkillStore {
     pub fn get_all_targets(&self) -> Result<Vec<SkillTargetRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error FROM skill_targets",
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash FROM skill_targets",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(SkillTargetRecord {
@@ -480,6 +498,7 @@ impl SkillStore {
                 status: row.get(5)?,
                 synced_at: row.get(6)?,
                 last_error: row.get(7)?,
+                source_hash: row.get(8)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1217,7 +1236,7 @@ impl SkillStore {
         let conn = self.conn.lock().unwrap();
         let placeholders: Vec<String> = (1..=skill_ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
-            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error \
+            "SELECT id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash \
              FROM skill_targets WHERE skill_id IN ({})",
             placeholders.join(", ")
         );
@@ -1236,6 +1255,7 @@ impl SkillStore {
                 status: row.get(5)?,
                 synced_at: row.get(6)?,
                 last_error: row.get(7)?,
+                source_hash: row.get(8)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1267,8 +1287,8 @@ impl SkillStore {
         let tx = conn.unchecked_transaction()?;
         for target in targets {
             tx.execute(
-                "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT OR REPLACE INTO skill_targets (id, skill_id, tool, target_path, mode, status, synced_at, last_error, source_hash) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     target.id,
                     target.skill_id,
@@ -1278,6 +1298,7 @@ impl SkillStore {
                     target.status,
                     target.synced_at,
                     target.last_error,
+                    target.source_hash,
                 ],
             )?;
         }
@@ -1475,6 +1496,122 @@ impl SkillStore {
             stmt.execute(params![i as i32, now, id, scenario_id])?;
         }
         Ok(())
+    }
+
+    // ── Audit log ──
+
+    /// Append an audit entry. Best-effort: errors are swallowed so callers
+    /// never have to wrap or propagate them. Auto-prunes when the table
+    /// grows beyond AUDIT_MAX_ENTRIES.
+    pub fn log_audit(&self, draft: AuditDraft) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let insert = conn.execute(
+            "INSERT INTO audit_log (ts, action, skill_id, skill_name, tool, success, detail)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                ts,
+                draft.action,
+                draft.skill_id,
+                draft.skill_name,
+                draft.tool,
+                draft.success as i32,
+                draft.detail,
+            ],
+        );
+        if insert.is_err() {
+            return;
+        }
+        // Prune to MAX_ENTRIES newest. Cheap when under the cap (DELETE matches 0 rows).
+        let _ = conn.execute(
+            "DELETE FROM audit_log WHERE id IN (
+                 SELECT id FROM audit_log ORDER BY id DESC LIMIT -1 OFFSET ?1
+             )",
+            params![AUDIT_MAX_ENTRIES],
+        );
+    }
+
+    /// Read the most recent audit entries (newest first). When `limit` is
+    /// `None`, returns everything.
+    pub fn list_audit(&self, limit: Option<i64>) -> Result<Vec<AuditEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let sql = if limit.is_some() {
+            "SELECT id, ts, action, skill_id, skill_name, tool, success, detail
+             FROM audit_log ORDER BY id DESC LIMIT ?1"
+        } else {
+            "SELECT id, ts, action, skill_id, skill_name, tool, success, detail
+             FROM audit_log ORDER BY id DESC"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<AuditEntry> {
+            Ok(AuditEntry {
+                id: row.get(0)?,
+                ts: row.get(1)?,
+                action: row.get(2)?,
+                skill_id: row.get(3)?,
+                skill_name: row.get(4)?,
+                tool: row.get(5)?,
+                success: row.get::<_, i32>(6)? != 0,
+                detail: row.get(7)?,
+            })
+        };
+        let rows = if let Some(n) = limit {
+            stmt.query_map(params![n], map_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            stmt.query_map([], map_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod audit_log_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn log_audit_appends_and_lists_newest_first() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+
+        store.log_audit(AuditDraft::new("install").skill("id1", "first").ok());
+        store.log_audit(AuditDraft::new("install").skill("id2", "second").ok());
+        store.log_audit(
+            AuditDraft::new("remove")
+                .skill("id1", "first")
+                .fail("missing"),
+        );
+
+        let entries = store.list_audit(None).unwrap();
+        assert_eq!(entries.len(), 3);
+        // Newest first
+        assert_eq!(entries[0].action, "remove");
+        assert!(!entries[0].success);
+        assert_eq!(entries[0].detail.as_deref(), Some("missing"));
+        assert_eq!(entries[2].action, "install");
+        assert_eq!(entries[2].skill_name.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn log_audit_respects_limit() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        for i in 0..5 {
+            store.log_audit(AuditDraft::new("sync").detail(format!("{i}")).ok());
+        }
+        let entries = store.list_audit(Some(2)).unwrap();
+        assert_eq!(entries.len(), 2);
+        // Newest first — latest detail is "4".
+        assert_eq!(entries[0].detail.as_deref(), Some("4"));
     }
 }
 

@@ -5,13 +5,13 @@ use std::fmt;
 ///
 /// Serialized as `{"kind": "Database", "message": "..."}` so the frontend
 /// can branch on `kind` while still showing a human-readable `message`.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AppError {
     pub kind: ErrorKind,
     pub message: String,
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     Database,

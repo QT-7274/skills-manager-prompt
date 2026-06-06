@@ -22,14 +22,14 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "../utils";
 import { useApp } from "../context/AppContext";
-import { CreateScenarioDialog } from "./CreateScenarioDialog";
-import { RenameScenarioDialog } from "./RenameScenarioDialog";
+import { CreatePresetDialog } from "./CreatePresetDialog";
+import { RenamePresetDialog } from "./RenamePresetDialog";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { AgentIcon } from "./AgentIcon";
 import * as api from "../lib/tauri";
-import type { SyncHealth } from "../lib/tauri";
-import { getScenarioIconOption } from "../lib/scenarioIcons";
+import type { SyncHealth, ToolCategory, ToolInfo } from "../lib/tauri";
+import { getPresetIconOption } from "../lib/presetIcons";
 
 function getSyncHealthIndicator(health: SyncHealth, skillCount: number): { color: string; title: string } | null {
   if (skillCount === 0) return null;
@@ -49,7 +49,7 @@ export function Sidebar() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const { scenarios, viewedScenario, setViewedScenarioId, refreshScenarios, refreshManagedSkills, projects, refreshProjects, tools, managedSkills } = useApp();
+  const { presets, viewedPreset, setViewedPresetId, refreshPresets, refreshManagedSkills, projects, refreshProjects, tools, managedSkills } = useApp();
   const [showCreate, setShowCreate] = useState(false);
   const [showAddProject, setShowAddProject] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; icon?: string | null } | null>(null);
@@ -58,14 +58,24 @@ export function Sidebar() {
   const [aiCreating, setAiCreating] = useState(false);
   const [untaggedWarning, setUntaggedWarning] = useState(false);
   const installedTools = useMemo(() => tools.filter((t) => t.installed && t.enabled), [tools]);
-  const [orderedScenarios, setOrderedScenarios] = useState(scenarios);
+  const installedCodingTools = useMemo(
+    () => installedTools.filter((t) => t.category === "coding"),
+    [installedTools]
+  );
+  const installedLobsterTools = useMemo(
+    () => installedTools.filter((t) => t.category === "lobster"),
+    [installedTools]
+  );
+  const [orderedPresets, setOrderedPresets] = useState(presets);
   const [orderedProjects, setOrderedProjects] = useState(projects);
-  const [orderedTools, setOrderedTools] = useState(installedTools);
-  const scenarioReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [orderedCodingTools, setOrderedCodingTools] = useState(installedCodingTools);
+  const [orderedLobsterTools, setOrderedLobsterTools] = useState(installedLobsterTools);
+  const presetReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
   const projectReorderQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const [scenariosOpen, setScenariosOpen] = useState(true);
+  const [presetsOpen, setPresetsOpen] = useState(true);
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [globalWorkspaceOpen, setGlobalWorkspaceOpen] = useState(true);
+  const [lobsterWorkspaceOpen, setLobsterWorkspaceOpen] = useState(true);
 
   const globalSkillsByAgent = useMemo(() => {
     const map: Record<string, number> = {};
@@ -77,35 +87,47 @@ export function Sidebar() {
     return map;
   }, [installedTools, managedSkills]);
 
-  useEffect(() => { setOrderedScenarios(scenarios); }, [scenarios]);
+  useEffect(() => { setOrderedPresets(presets); }, [presets]);
   useEffect(() => { setOrderedProjects(projects); }, [projects]);
   useEffect(() => {
     const stored = localStorage.getItem("skills-manager:tool-order");
     const storedOrder: string[] = stored ? JSON.parse(stored) : [];
     const sorted = [
       ...storedOrder.flatMap((key) => {
-        const t = installedTools.find((t) => t.key === key);
+        const t = installedCodingTools.find((t) => t.key === key);
         return t ? [t] : [];
       }),
-      ...installedTools.filter((t) => !storedOrder.includes(t.key)),
+      ...installedCodingTools.filter((t) => !storedOrder.includes(t.key)),
     ];
-    setOrderedTools(sorted);
-  }, [installedTools]);
+    setOrderedCodingTools(sorted);
+  }, [installedCodingTools]);
+  useEffect(() => {
+    const stored = localStorage.getItem("skills-manager:lobster-tool-order");
+    const storedOrder: string[] = stored ? JSON.parse(stored) : [];
+    const sorted = [
+      ...storedOrder.flatMap((key) => {
+        const t = installedLobsterTools.find((t) => t.key === key);
+        return t ? [t] : [];
+      }),
+      ...installedLobsterTools.filter((t) => !storedOrder.includes(t.key)),
+    ];
+    setOrderedLobsterTools(sorted);
+  }, [installedLobsterTools]);
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination || result.destination.index === result.source.index) return;
-    const reordered = [...orderedScenarios];
+    const reordered = [...orderedPresets];
     const [moved] = reordered.splice(result.source.index, 1);
     reordered.splice(result.destination.index, 0, moved);
-    setOrderedScenarios(reordered);
+    setOrderedPresets(reordered);
 
-    scenarioReorderQueueRef.current = scenarioReorderQueueRef.current
+    presetReorderQueueRef.current = presetReorderQueueRef.current
       .catch(() => undefined)
       .then(async () => {
         try {
-          await api.reorderScenarios(reordered.map((s) => s.id));
+          await api.reorderPresets(reordered.map((s) => s.id));
         } catch {
-          await refreshScenarios();
+          await refreshPresets();
           toast.error(t("common.error"));
         }
       });
@@ -130,13 +152,19 @@ export function Sidebar() {
       });
   };
 
-  const handleToolDragEnd = (result: DropResult) => {
+  const handleToolDragEnd = (category: ToolCategory) => (result: DropResult) => {
     if (!result.destination || result.destination.index === result.source.index) return;
-    const reordered = [...orderedTools];
+    const current = category === "lobster" ? orderedLobsterTools : orderedCodingTools;
+    const reordered = [...current];
     const [moved] = reordered.splice(result.source.index, 1);
     reordered.splice(result.destination.index, 0, moved);
-    setOrderedTools(reordered);
-    localStorage.setItem("skills-manager:tool-order", JSON.stringify(reordered.map((t) => t.key)));
+    if (category === "lobster") {
+      setOrderedLobsterTools(reordered);
+      localStorage.setItem("skills-manager:lobster-tool-order", JSON.stringify(reordered.map((t) => t.key)));
+    } else {
+      setOrderedCodingTools(reordered);
+      localStorage.setItem("skills-manager:tool-order", JSON.stringify(reordered.map((t) => t.key)));
+    }
   };
 
   const NAV_ITEMS = [
@@ -145,30 +173,29 @@ export function Sidebar() {
     { name: t("sidebar.installSkills"), path: "/install", icon: Download },
   ];
 
-  const handleSwitchScenario = (id: string) => {
-    setViewedScenarioId(id);
+  const handleSwitchPreset = (id: string) => {
+    setViewedPresetId(id);
     if (location.pathname !== "/my-skills") {
       navigate("/my-skills");
     }
   };
 
-  const handleCreateScenario = async (name: string, description?: string, icon?: string) => {
-    await api.createScenario(name, description, icon);
-    await Promise.all([refreshScenarios(), refreshManagedSkills()]);
+  const handleCreatePreset = async (name: string, description?: string, icon?: string) => {
+    await api.createPreset(name, description, icon);
+    await Promise.all([refreshPresets(), refreshManagedSkills()]);
     if (location.pathname === "/settings") {
       navigate("/my-skills");
     }
-    toast.success(t("scenario.created"));
+    toast.success(t("preset.created"));
   };
 
-  const handleAiCreateScenario = async () => {
+  const handleAiCreatePreset = async () => {
     const aiProviderReady = await api.isAiProviderConfigured();
     if (!aiProviderReady) {
       toast.error(t("mySkills.aiTaggingNoApiKey"));
       return;
     }
 
-    // Check untagged ratio — warn if > 50%
     const allSkills = await api.getManagedSkills();
     const untaggedCount = allSkills.filter((s) => !s.tags || s.tags.length === 0).length;
     if (allSkills.length > 0 && untaggedCount / allSkills.length > 0.5) {
@@ -176,10 +203,10 @@ export function Sidebar() {
       return;
     }
 
-    await doAiCreateScenario();
+    await doAiCreatePreset();
   };
 
-  const doAiCreateScenario = async () => {
+  const doAiCreatePreset = async () => {
     setAiCreating(true);
     try {
       const skills = await api.getManagedSkills();
@@ -190,11 +217,11 @@ export function Sidebar() {
       }));
       const result = await api.invokeAiTask("create_scenario", {
         skills: skillList,
-        existingScenarios: scenarios.map((s) => s.name),
+        existingScenarios: presets.map((s) => s.name),
       });
       if (result.scenarios && result.scenarios.length > 0) {
         for (const suggestion of result.scenarios) {
-          const created = await api.createScenario(
+          const created = await api.createPreset(
             suggestion.name,
             suggestion.description,
             suggestion.icon
@@ -202,60 +229,60 @@ export function Sidebar() {
           for (const skillName of suggestion.skillNames) {
             const matchedSkill = skills.find((s) => s.name === skillName);
             if (matchedSkill) {
-              await api.addSkillToScenario(matchedSkill.id, created.id);
+              await api.addSkillToPreset(matchedSkill.id, created.id);
             }
           }
         }
-        await Promise.all([refreshScenarios(), refreshManagedSkills()]);
-        toast.success(t("scenario.aiCreateScenarioSuccess"));
+        await Promise.all([refreshPresets(), refreshManagedSkills()]);
+        toast.success(t("preset.aiCreateScenarioSuccess"));
       } else {
-        toast.info(t("scenario.aiCreateScenarioEmpty"));
+        toast.info(t("preset.aiCreateScenarioEmpty"));
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t("scenario.aiCreateScenarioError");
+      const msg = error instanceof Error ? error.message : t("preset.aiCreateScenarioError");
       toast.error(msg);
     } finally {
       setAiCreating(false);
     }
   };
 
-  const handleRenameScenario = async (newName: string, icon?: string) => {
+  const handleRenamePreset = async (newName: string, icon?: string) => {
     if (!renameTarget) return;
-    const scenario = scenarios.find((s) => s.id === renameTarget.id);
-    if (!scenario) return;
-    await api.updateScenario(
+    const preset = presets.find((s) => s.id === renameTarget.id);
+    if (!preset) return;
+    await api.updatePreset(
       renameTarget.id,
       newName,
-      scenario.description || undefined,
-      icon || scenario.icon || undefined
+      preset.description || undefined,
+      icon || preset.icon || undefined
     );
-    await refreshScenarios();
-    toast.success(t("scenario.renamed"));
+    await refreshPresets();
+    toast.success(t("preset.renamed"));
   };
 
-  const handleDeleteScenario = async () => {
+  const handleDeletePreset = async () => {
     if (!deleteTarget) return;
-    await api.deleteScenario(deleteTarget.id);
-    await Promise.all([refreshScenarios(), refreshManagedSkills()]);
+    await api.deletePreset(deleteTarget.id);
+    await Promise.all([refreshPresets(), refreshManagedSkills()]);
     if (location.pathname === "/settings") {
       navigate("/my-skills");
     }
-    toast.success(t("scenario.deleted"));
+    toast.success(t("preset.deleted"));
   };
 
   const handleRenameClick = (
     event: React.MouseEvent,
-    scenario: { id: string; name: string; icon?: string | null }
+    preset: { id: string; name: string; icon?: string | null }
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    setRenameTarget(scenario);
+    setRenameTarget(preset);
   };
 
-  const handleDeleteClick = (event: React.MouseEvent, scenario: { id: string; name: string }) => {
+  const handleDeleteClick = (event: React.MouseEvent, preset: { id: string; name: string }) => {
     event.preventDefault();
     event.stopPropagation();
-    setDeleteTarget(scenario);
+    setDeleteTarget(preset);
   };
 
   const handleDeleteProject = async () => {
@@ -266,6 +293,144 @@ export function Sidebar() {
       navigate("/");
     }
     toast.success(t("project.removed"));
+  };
+
+  // Renders one workspace category section (Global Workspace for coding agents,
+  // Lobster Agents for lobster agents). Both sections share identical UX —
+  // collapsible heading, "All Agents" overview entry, and a drag-orderable list.
+  const renderToolGroup = (group: {
+    category: ToolCategory;
+    headingLabel: string;
+    allAgentsLabel: string;
+    emptyLabel: string;
+    basePath: string;
+    droppableId: string;
+    tools: ToolInfo[];
+    isOpen: boolean;
+    onToggle: () => void;
+    hideWhenEmpty: boolean;
+  }) => {
+    if (group.hideWhenEmpty && group.tools.length === 0) return null;
+    return (
+      <>
+        <div className="mb-1.5 px-2.5 flex items-center gap-1">
+          <button
+            onClick={group.onToggle}
+            className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none"
+          >
+            {group.isOpen
+              ? <ChevronDown className="h-3 w-3 shrink-0 text-faint" />
+              : <ChevronRight className="h-3 w-3 shrink-0 text-faint" />}
+            <span className="truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
+              {group.headingLabel}
+            </span>
+          </button>
+        </div>
+        {group.isOpen && (
+          <>
+            {/* Pinned overview item */}
+            {(() => {
+              const isActive = location.pathname === group.basePath;
+              return (
+                <Link
+                  to={group.basePath}
+                  className={cn(
+                    "mb-0.5 flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] text-sm transition-colors outline-none",
+                    isActive
+                      ? "bg-surface-active font-medium text-primary"
+                      : "text-tertiary hover:text-secondary hover:bg-surface-hover"
+                  )}
+                >
+                  <span className={cn(
+                    "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded border",
+                    isActive
+                      ? "border-accent/30 bg-accent/10 text-accent"
+                      : "border-border bg-surface text-muted"
+                  )}>
+                    <Globe className="h-3 w-3" />
+                  </span>
+                  <span className="flex-1 truncate">{group.allAgentsLabel}</span>
+                </Link>
+              );
+            })()}
+            {group.tools.length === 0 ? (
+              <p className="px-5 py-1.5 text-[12px] text-faint">{group.emptyLabel}</p>
+            ) : (
+              <DragDropContext onDragEnd={handleToolDragEnd(group.category)}>
+                <Droppable droppableId={group.droppableId}>
+                  {(droppableProvided) => (
+                    <div
+                      className="space-y-0.5"
+                      ref={droppableProvided.innerRef}
+                      {...droppableProvided.droppableProps}
+                    >
+                      {group.tools.map((tool, index) => {
+                        const skillCount = globalSkillsByAgent[tool.key] ?? 0;
+                        const isActive = location.pathname === `${group.basePath}/${tool.key}`;
+                        return (
+                          <Draggable key={tool.key} draggableId={tool.key} index={index}>
+                            {(provided) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                className={cn(
+                                  "group relative flex items-center rounded-[5px] transition-colors",
+                                  isActive ? "bg-surface-active" : "hover:bg-surface-hover"
+                                )}
+                              >
+                                <button
+                                  onClick={() => navigate(`${group.basePath}/${tool.key}`)}
+                                  className={cn(
+                                    "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm leading-5 outline-none",
+                                    isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
+                                  )}
+                                >
+                                  <AgentIcon
+                                    agentKey={tool.key}
+                                    displayName={tool.display_name}
+                                    className={cn(
+                                      "h-[20px] w-[20px] rounded border transition-colors",
+                                      isActive ? "border-accent/30 bg-accent/10" : "group-hover:border-border"
+                                    )}
+                                  />
+                                  <span className="flex-1 truncate">{tool.display_name}</span>
+                                  <span className="ml-auto flex h-[18px] w-[32px] shrink-0 items-center justify-end group-hover:hidden">
+                                    {skillCount > 0 && (
+                                      <span className={cn(
+                                        "min-w-[18px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
+                                        isActive ? "bg-accent-bg text-accent-light" : "bg-surface-hover text-muted"
+                                      )}>
+                                        {skillCount}
+                                      </span>
+                                    )}
+                                  </span>
+                                </button>
+                                <div className={cn(
+                                  "absolute right-1 flex items-center rounded-[3px] invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100",
+                                  isActive ? "bg-surface-active" : "bg-surface-hover"
+                                )}>
+                                  <div
+                                    {...provided.dragHandleProps}
+                                    className="rounded p-1 text-faint cursor-grab active:cursor-grabbing"
+                                  >
+                                    <GripVertical className="h-3 w-3" />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </Draggable>
+                        );
+                      })}
+                      {droppableProvided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
+            )}
+          </>
+        )}
+      </>
+    );
   };
 
   return (
@@ -317,33 +482,33 @@ export function Sidebar() {
           {/* ── Presets ── */}
           <div className="mb-1.5 px-2.5 flex items-center gap-1">
             <button
-              onClick={() => setScenariosOpen((v) => !v)}
+              onClick={() => setPresetsOpen((v) => !v)}
               className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none"
             >
-              {scenariosOpen
+              {presetsOpen
                 ? <ChevronDown className="h-3 w-3 shrink-0 text-faint" />
                 : <ChevronRight className="h-3 w-3 shrink-0 text-faint" />}
               <span className="truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
-                {t("sidebar.scenarios")}
+                {t("sidebar.presets")}
               </span>
             </button>
           </div>
-          {scenariosOpen && (
+          {presetsOpen && (
             <>
               <DragDropContext onDragEnd={handleDragEnd}>
-                <Droppable droppableId="scenarios">
+                <Droppable droppableId="presets">
                   {(droppableProvided) => (
                     <div
                       className="space-y-0.5"
                       ref={droppableProvided.innerRef}
                       {...droppableProvided.droppableProps}
                     >
-                      {orderedScenarios.map((scenario, index) => {
-                        const isActive = viewedScenario?.id === scenario.id;
-                        const scenarioIcon = getScenarioIconOption(scenario);
-                        const ScenarioIcon = scenarioIcon.icon;
+                      {orderedPresets.map((preset, index) => {
+                        const isActive = viewedPreset?.id === preset.id;
+                        const presetIcon = getPresetIconOption(preset);
+                        const PresetIcon = presetIcon.icon;
                         return (
-                          <Draggable key={scenario.id} draggableId={scenario.id} index={index}>
+                          <Draggable key={preset.id} draggableId={preset.id} index={index}>
                             {(provided) => (
                               <div
                                 ref={provided.innerRef}
@@ -354,7 +519,7 @@ export function Sidebar() {
                                 )}
                               >
                                 <button
-                                  onClick={() => handleSwitchScenario(scenario.id)}
+                                  onClick={() => handleSwitchPreset(preset.id)}
                                   className={cn(
                                     "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm leading-5 outline-none",
                                     isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
@@ -364,15 +529,15 @@ export function Sidebar() {
                                     className={cn(
                                       "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded border",
                                       isActive
-                                        ? `${scenarioIcon.activeClass} ${scenarioIcon.colorClass}`
+                                        ? `${presetIcon.activeClass} ${presetIcon.colorClass}`
                                         : "border-border bg-surface text-muted group-hover:border-border group-hover:text-tertiary"
                                     )}
                                   >
-                                    <ScenarioIcon className="h-3 w-3" />
+                                    <PresetIcon className="h-3 w-3" />
                                   </span>
-                                  <span className="flex-1 truncate">{scenario.name}</span>
+                                  <span className="flex-1 truncate">{preset.name}</span>
                                   <span className="ml-auto flex h-[18px] w-[32px] shrink-0 items-center justify-end group-hover:hidden">
-                                    {scenario.skill_count > 0 && (
+                                    {preset.skill_count > 0 && (
                                       <span
                                         className={cn(
                                           "min-w-[18px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
@@ -381,7 +546,7 @@ export function Sidebar() {
                                             : "bg-surface-hover text-muted"
                                         )}
                                       >
-                                        {scenario.skill_count}
+                                        {preset.skill_count}
                                       </span>
                                     )}
                                   </span>
@@ -397,14 +562,14 @@ export function Sidebar() {
                                     <GripVertical className="h-3 w-3" />
                                   </div>
                                   <button
-                                    onClick={(event) => handleRenameClick(event, scenario)}
+                                    onClick={(event) => handleRenameClick(event, preset)}
                                     className="rounded p-1 text-faint transition hover:text-secondary"
                                     title={t("common.rename")}
                                   >
                                     <Pencil className="h-3 w-3" />
                                   </button>
                                   <button
-                                    onClick={(event) => handleDeleteClick(event, scenario)}
+                                    onClick={(event) => handleDeleteClick(event, preset)}
                                     className="rounded p-1 text-faint transition hover:text-red-400"
                                     title={t("common.delete")}
                                   >
@@ -427,13 +592,13 @@ export function Sidebar() {
                   className="flex flex-1 items-center gap-2 rounded-[5px] px-2.5 py-[7px] text-sm text-muted transition-colors hover:bg-surface-hover hover:text-secondary outline-none"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {t("sidebar.newScenario")}
+                  {t("sidebar.newPreset")}
                 </button>
                 <button
-                  onClick={handleAiCreateScenario}
+                  onClick={handleAiCreatePreset}
                   disabled={aiCreating}
                   className="rounded p-1 text-accent-light/70 transition-colors hover:bg-accent-bg/50 hover:text-accent-light disabled:opacity-50"
-                  title={t("scenario.aiCreateScenario")}
+                  title={t("preset.aiCreateScenario")}
                 >
                   {aiCreating ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -448,121 +613,38 @@ export function Sidebar() {
           {/* Divider */}
           <div className="mx-0.5 mt-3.5 mb-2.5 border-t border-border-subtle" />
 
-          {/* ── Global Workspace ── */}
-          <div className="mb-1.5 px-2.5 flex items-center gap-1">
-            <button
-              onClick={() => setGlobalWorkspaceOpen((v) => !v)}
-              className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none"
-            >
-              {globalWorkspaceOpen
-                ? <ChevronDown className="h-3 w-3 shrink-0 text-faint" />
-                : <ChevronRight className="h-3 w-3 shrink-0 text-faint" />}
-              <span className="truncate text-[12px] font-semibold tracking-[0.01em] text-muted whitespace-nowrap">
-                {t("sidebar.globalWorkspace")}
-              </span>
-            </button>
-          </div>
-          {globalWorkspaceOpen && (
+          {renderToolGroup({
+            category: "coding",
+            headingLabel: t("sidebar.globalWorkspace"),
+            allAgentsLabel: t("globalWorkspace.allAgents"),
+            emptyLabel: t("globalWorkspace.noAgents"),
+            basePath: "/global-workspace",
+            droppableId: "global-workspace-tools",
+            tools: orderedCodingTools,
+            isOpen: globalWorkspaceOpen,
+            onToggle: () => setGlobalWorkspaceOpen((v) => !v),
+            // Always show the Global Workspace section (even when empty) so users
+            // with no detected coding agents still see the "All Agents" entry.
+            hideWhenEmpty: false,
+          })}
+
+          {installedLobsterTools.length > 0 && (
             <>
-              {/* Pinned overview item */}
-              {(() => {
-                const isActive = location.pathname === "/global-workspace";
-                return (
-                  <Link
-                    to="/global-workspace"
-                    className={cn(
-                      "mb-0.5 flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] text-sm transition-colors outline-none",
-                      isActive
-                        ? "bg-surface-active font-medium text-primary"
-                        : "text-tertiary hover:text-secondary hover:bg-surface-hover"
-                    )}
-                  >
-                    <span className={cn(
-                      "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded border",
-                      isActive
-                        ? "border-accent/30 bg-accent/10 text-accent"
-                        : "border-border bg-surface text-muted"
-                    )}>
-                      <Globe className="h-3 w-3" />
-                    </span>
-                    <span className="flex-1 truncate">{t("globalWorkspace.allAgents")}</span>
-                  </Link>
-                );
-              })()}
-              {orderedTools.length === 0 ? (
-                <p className="px-5 py-1.5 text-[12px] text-faint">{t("globalWorkspace.noAgents")}</p>
-              ) : (
-                <DragDropContext onDragEnd={handleToolDragEnd}>
-                  <Droppable droppableId="global-workspace-tools">
-                    {(droppableProvided) => (
-                      <div
-                        className="space-y-0.5"
-                        ref={droppableProvided.innerRef}
-                        {...droppableProvided.droppableProps}
-                      >
-                        {orderedTools.map((tool, index) => {
-                          const skillCount = globalSkillsByAgent[tool.key] ?? 0;
-                          const isActive = location.pathname === `/global-workspace/${tool.key}`;
-                          return (
-                            <Draggable key={tool.key} draggableId={tool.key} index={index}>
-                              {(provided) => (
-                                <div
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  className={cn(
-                                    "group relative flex items-center rounded-[5px] transition-colors",
-                                    isActive ? "bg-surface-active" : "hover:bg-surface-hover"
-                                  )}
-                                >
-                                  <button
-                                    onClick={() => navigate(`/global-workspace/${tool.key}`)}
-                                    className={cn(
-                                      "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left text-sm leading-5 outline-none",
-                                      isActive ? "font-medium text-primary" : "text-tertiary group-hover:text-secondary"
-                                    )}
-                                  >
-                                    <AgentIcon
-                                      agentKey={tool.key}
-                                      displayName={tool.display_name}
-                                      className={cn(
-                                        "h-[20px] w-[20px] rounded border transition-colors",
-                                        isActive ? "border-accent/30 bg-accent/10" : "group-hover:border-border"
-                                      )}
-                                    />
-                                    <span className="flex-1 truncate">{tool.display_name}</span>
-                                    <span className="ml-auto flex h-[18px] w-[32px] shrink-0 items-center justify-end group-hover:hidden">
-                                      {skillCount > 0 && (
-                                        <span className={cn(
-                                          "min-w-[18px] rounded-full px-1.5 text-center text-[12px] font-medium leading-[18px] tabular-nums",
-                                          isActive ? "bg-accent-bg text-accent-light" : "bg-surface-hover text-muted"
-                                        )}>
-                                          {skillCount}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </button>
-                                  <div className={cn(
-                                    "absolute right-1 flex items-center rounded-[3px] invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100",
-                                    isActive ? "bg-surface-active" : "bg-surface-hover"
-                                  )}>
-                                    <div
-                                      {...provided.dragHandleProps}
-                                      className="rounded p-1 text-faint cursor-grab active:cursor-grabbing"
-                                    >
-                                      <GripVertical className="h-3 w-3" />
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </Draggable>
-                          );
-                        })}
-                        {droppableProvided.placeholder}
-                      </div>
-                    )}
-                  </Droppable>
-                </DragDropContext>
-              )}
+              {/* Divider */}
+              <div className="mx-0.5 mt-3.5 mb-2.5 border-t border-border-subtle" />
+
+              {renderToolGroup({
+                category: "lobster",
+                headingLabel: t("sidebar.lobsterAgents"),
+                allAgentsLabel: t("lobsterWorkspace.allAgents"),
+                emptyLabel: t("lobsterWorkspace.noAgents"),
+                basePath: "/lobster-workspace",
+                droppableId: "lobster-workspace-tools",
+                tools: orderedLobsterTools,
+                isOpen: lobsterWorkspaceOpen,
+                onToggle: () => setLobsterWorkspaceOpen((v) => !v),
+                hideWhenEmpty: true,
+              })}
             </>
           )}
 
@@ -716,25 +798,25 @@ export function Sidebar() {
         </div>
       </div>
 
-      <CreateScenarioDialog
+      <CreatePresetDialog
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreate={handleCreateScenario}
+        onCreate={handleCreatePreset}
       />
 
-      <RenameScenarioDialog
+      <RenamePresetDialog
         open={renameTarget !== null}
         currentName={renameTarget?.name || ""}
         currentIcon={renameTarget?.icon}
         onClose={() => setRenameTarget(null)}
-        onRename={handleRenameScenario}
+        onRename={handleRenamePreset}
       />
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        message={t("scenario.deleteConfirm", { name: deleteTarget?.name || "" })}
+        message={t("preset.deleteConfirm", { name: deleteTarget?.name || "" })}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={handleDeleteScenario}
+        onConfirm={handleDeletePreset}
       />
 
       <AddProjectDialog
@@ -756,17 +838,17 @@ export function Sidebar() {
       <ConfirmDialog
         open={untaggedWarning}
         tone="warning"
-        title={t("scenario.untaggedWarningTitle")}
-        message={t("scenario.untaggedWarningMessage")}
-        cancelLabel={t("scenario.goTagFirst")}
-        confirmLabel={t("scenario.continueAnyway")}
+        title={t("preset.untaggedWarningTitle")}
+        message={t("preset.untaggedWarningMessage")}
+        cancelLabel={t("preset.goTagFirst")}
+        confirmLabel={t("preset.continueAnyway")}
         onClose={() => {
           setUntaggedWarning(false);
           navigate("/my-skills");
         }}
         onConfirm={async () => {
           setUntaggedWarning(false);
-          await doAiCreateScenario();
+          await doAiCreatePreset();
         }}
       />
     </>
